@@ -1,0 +1,14 @@
+[general]
+serveraliveinterval = 45
+compression = yes
+
+[source]
+url = dhr1.cesnet.cz
+username = [ username ]
+password = [ password ]
+
+[target]
+url = resto-test.c-scale.zcu.cz
+username = [ username ]
+password = [ password ]
+
