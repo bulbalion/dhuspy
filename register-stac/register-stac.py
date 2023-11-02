@@ -3,10 +3,10 @@
 
 PROGRAM_HEADER="""
 
-VERSION: 0.0.1c
+VERSION: 0.0.1d
 
-Last Update: 20231020
-Last Change: test result edits
+Last Update: 20231102
+Last Change: batch test result edits
 
 Changes:
 20230801 Initial version
@@ -22,6 +22,8 @@ Changes:
 20231017 test result edits
 20231018 test result edits
 20231020 test result edits
+20231101 batch test result edits
+20231102 batch test result edits
 
 Description:
 
@@ -30,12 +32,14 @@ DHR1 TO RESTO REWRITTEN: register-stac.sh from DHusTools
 """
 
 
-# INPUT: dhr1 xml files processed by stac tools uploaded to resto catalog
-DEBUG=1 # debug leve 3 brings tracebacks, 2 additional messages
 # PLOG MSG TYPES
 MDEBUG=2
 MINFO=1
 MWARNING=0
+
+# INPUT: dhr1 xml files processed by stac tools uploaded to resto catalog
+DEBUG=MDEBUG # debug leve 3 brings tracebacks, 2 additional messages
+
 # MAX JSON MB PARSE
 MAX_JSON_PARSE=16 # 16 MB
 # swap download filename
@@ -45,7 +49,8 @@ P_EXIT_SUCESS=0
 P_EXIT_FAILURE=1
 
 # CHANGE HERE DOWNLOAD DATA DIRECTORY
-FDIR_OUT="/home/user/app/register-stac/tmp/"
+FDIR_OUT="/home/$USER/dev/dhuspy/register-stac/tmp/"
+FNAME_LOCK="register-stac.lock"
 
 # IMPORTS
 import bs4 as bs
@@ -82,6 +87,14 @@ def fwrite(file,txt):
   f.close()
   return(0)
 
+# REQ 20230801002 Obtains metadata for the given product from DHuS storage | 002
+# save node.xml
+def fexists(file):
+  str_fname=FDIR_OUT+file
+  #print(str_fname)
+  ret=Path(str_fname).is_file()
+  return(int(ret))
+
 # inspect
 def __FILE__() -> str:
   # ptyhon has a native __file__
@@ -110,10 +123,10 @@ def read_ini():
         if config["source"]["username"] not in config and config["target"]["username"] not in config:
           if config["source"]["password"] not in config and config["target"]["password"] not in config:
             plog("[!] Config file read problem")
-            exit(P_EXIT_FAILURE)
-  plog(str(config.sections()))
-  plog('CFG SOURCE URL: '+config['source']['url'])
-  plog('CFG TARGET URL: '+config['target']['url'])
+            osexit(P_EXIT_FAILURE)
+  #plog(str(config.sections()))
+  plog('[*] CFG SOURCE URL: '+config['source']['url'])
+  plog('[*] CFG TARGET URL: '+config['target']['url'])
   #print(config['source']['username'])
   #print(config['source']['password'])
   return(config)
@@ -124,13 +137,19 @@ def read_ini():
 
 # EXCEPTION HANDLER
 def exc_handl(e,msg,warning=True):
+  if e is None:
+    e="Undefined Error"
   if DEBUG>2:
     traceback.print_exc(file=sys.stdout)
   if DEBUG>1:
     plog(msg,2) # CHANGE HERE
   if warning==True:
-    plog("[!] Exception message: "+str(e))    
+    if e is not None:  
+      plog("[!] Exception message: "+str(e))
+  return(P_EXIT_FAILURE)
 
+def osexit(P_ERR_CODE):
+  exit(P_ERR_CODE)
 
 # REQ 20230801003 endpoint specified in configuration - write
 # WRITE CONFIG
@@ -171,16 +190,16 @@ def proc_cmd_opts():
     #plog("args: "+str(args))
     #plog(len(args))
     if len(args)>0:
-      plog(args[0])
+      #plog(args[0])
       ID=args[0]
-      plog("[*] INPUT ID: "+ID)
+      plog("[I] INPUT ID: "+ID)
       return(ID)
     else:
-      plog("[*] NO ID ARGUMENT SPECIFIED")
-      exit(P_EXIT_FAILURE)
+      plog("[ ERR RS-0010 ][!][ NO ARGUMENT SPECIFIED ]")
+      osexit(P_EXIT_FAILURE)
   except getopt.GetoptError as e:
-    plog(e + " " + " NO ID ARGUMENT SPECIFIED")
-    exit(P_EXIT_FAILURE)
+    exc_handl(e,"[ ERR RS-0020 ][!][ FAILURE IN ARGUMENTS PROCESSING. ]")
+    osexit(P_EXIT_FAILURE)
 
 # BASIC INPUT ID VERIFICATION
 def check_source_id(src_id):
@@ -192,18 +211,20 @@ def check_source_id(src_id):
 
   if ID:
     if len(ID) == FIXED_ID_LEN:
-      plog("[ CTRL ] ID LENGTH %d ... O.K.]" % FIXED_ID_LEN)
+      plog("[*] [ CTRL ]: ID LENGTH %d ... O.K.]" % FIXED_ID_LEN)
       CTRL_001=1
     try:
       if (ID.split("-")==4):
         CTRL_002=1
     except Exception as e:
-      plog(e)
-      plog("[!] CTRL_002 Does not comply to the common format.")
-      exit(P_EXIT_FAILURE)
+      exc_handl(e,"[ ERR RS-0030 ][!] CTRL_002 DOES NOT COMPLY TO THE COMMON FORMAT")
+      #plog(e)
+      #plog("[!] CTRL_002 Does not comply to the common format.")
+      osexit(P_EXIT_FAILURE)
   if not CTRL_001 == 1 and not CTRL_002 == 1:
-    plog("[!] Both CTRL_001 or CTRL_002 Controls did not pass. ID seems to be malformed.")
-    exit(P_EXIT_FAILURE)
+    #plog("[ ERR RS-0040 ][!] BOTH CTRL_002 DOES NOT COMPLY TO THE COMMON FORMAT")
+    plog("[ERR RS-0040 ][!][ BOTH CTRL_001 OR CTRL_002 Controls did not pass. ID seems to be malformed. ]")
+    osexit(P_EXIT_FAILURE)
 
 # TEST
 # proc_cmd_opts()
@@ -234,7 +255,7 @@ def get_api(hostname,sub_url,user=None,password=None,params=dict(),post=False,is
   #   # key = 'str_value'
   # )
   #
-  if DEBUG: plog("URL: "+url)
+  if DEBUG: plog("[w] URL: "+url)
   #
 
   try:
@@ -293,6 +314,8 @@ def get_collection_metadata():
 
 # Get source metadata
 def get_source_metadata(config,P_ID):
+
+
   server= config['source']['url']
   sub_url = "/odata/v1/Products('"+P_ID+"')/Nodes"
   res=get_api(server,sub_url,user=config['source']['username'],password=config['source']['password']) # CONF
@@ -314,7 +337,7 @@ def get_source_metadata(config,P_ID):
 #
 def update_source_metadata_nodexml(fname):
   xml=fread(fname)
-  plog(xml)
+  #plog(xml)
   src_xml = bs.BeautifulSoup(xml,features="xml")
   titles=[]
   ids=[]
@@ -342,6 +365,30 @@ def update_source_metadata_nodexml(fname):
 #CID,PLATFORM,titles=update_source_metadata_nodexml("node.xml")
 #plog("CID: "+CID + " PLATFORM: " + PLATFORM)
 
+def platform2fname_manifest(P_ID,PLATFORM,TITLE):
+  # ADD 20231101
+  FNAME_MANIFEST="manifest.safe"
+  # MANIFEST BY PLATFORM
+  if PLATFORM == "S1" or PLATFORM == "S2":
+    FNAME_MANIFEST="manifest.safe"
+  elif PLATFORM == "S3" or PLATFORM == "S3":
+    FNAME_MANIFEST="xfdumanifest.xml"
+  else:
+    FNAME_MANIFEST="manifest.safe"
+  return(FNAME_MANIFEST)
+
+def platform2manifest_url(P_ID,TITLE,PLATFORM):
+  FNAME_MANIFEST=platform2fname_manifest(P_ID,PLATFORM,TITLE)
+  sub_url = "/odata/v1/Products('"+P_ID+"')/Nodes('"+TITLE+"')"+"/"+"Nodes('"+FNAME_MANIFEST+"')/$value"
+  if PLATFORM == "S1" or PLATFORM == "S2" or PLATFORM == "S3" or PLATFORM == "S3p":
+    sub_url = "/odata/v1/Products('"+P_ID+"')/Nodes('"+TITLE+"')"+"/"+"Nodes('"+FNAME_MANIFEST+"')/$value"
+  else:
+    #sub_url = "/odata/v1/Products('"+P_ID+"')/Nodes('"+TITLE+"')"+"/$value"
+    sub_url = "/odata/v1/Products('"+P_ID+"')/$value"
+    sub_url = "/odata/v1/Products('"+P_ID+"')"
+    #plog(sub_url)
+  return(sub_url)
+
 
 # REQ 20230801004 Downloads additional metadata files required by stac-tools
 # for the given product type. The actual list of files do download depends on 
@@ -353,24 +400,44 @@ def update_source_metadata_nodexml(fname):
 # /MTD_MSIL2A.xml|MTD_MSIL1C.xml|/MTD_TL.xml|annotation/s1a.*xml" 
 # sed 's/.*href="//' | sed 's/".*//' |
 #
-def get_source_metadata_manifest_safe(config,P_ID,TITLE):
+def get_source_metadata_manifest_safe(config,P_ID,TITLE,PLATFORM):
+  manifest_url=platform2manifest_url(P_ID,TITLE,PLATFORM)
+  FNAME_MANIFEST=platform2fname_manifest(P_ID,TITLE,PLATFORM)
   server=config["source"]["url"] # REVIEW TBD HERE
+
   #api_protocol="https://"
   #server= "dhr1.cesnet.cz"
-  sub_url = "/odata/v1/Products('"+P_ID+"')/Nodes('"+TITLE+"')"+"/"+"Nodes('manifest.safe')/$value"
+  #sub_url = "/odata/v1/Products('"+P_ID+"')/Nodes('"+TITLE+"')"+"/"+"Nodes('"+FNAME_MANIFEST+"')/$value"
+
+  sub_url = manifest_url
   res=get_api(server,sub_url,user=config['source']['username'],password=config['source']['password']) # CONF
   # ADV DEBUG plog(res.split('\n')[:10])
   if res:
     # CREATE DIR IF IT DOES NOT EXISTS
     try:
       os.mkdir(FDIR_OUT+TITLE)
+      plog(f"[*][001] PRODUCT DIR {TITLE} CREATED.")
     except:
-      plog("[*] PRODUCT DIR ALREADY EXISTS "+TITLE)
-    fwrite(TITLE+os.sep+"manifest.safe",res)
-    plog("[o] manifest.safe file save : "+TITLE+os.sep+"manifest.safe")
+      plog("[!][001] PRODUCT DIR ALREADY EXISTS "+TITLE)
+    try:
+      newdir = Path(FDIR_OUT+os.sep+TITLE)
+      newdir.mkdir(parents=True,exist_ok=True) # 20231019
+      plog(f"[*][S002] PRODUCT DIR {TITLE} CREATED.")
+    except:
+      plog("[!][S002] PRODUCT DIR ALREADY EXISTS "+TITLE)
+    try:
+      #fwrite(TITLE+os.sep+FNAME_MANIFEST,res)
+      fwrite(TITLE+os.sep+"manifest.safe",res)
+      plog(f"[o] PLATFORM: {PLATFORM}, FNAME: {FNAME_MANIFEST} file saved.")
+    except Exception as e:
+      plog(f"[*] CANNOT SAVE MANIFEST FILE {FNAME_MANIFEST} {str(e)}")
+      osexit(P_EXIT_FAILURE)
+  else:
+    plog(f"[*] CANNOT SAVE MANIFEST FILE {FNAME_MANIFEST} Error: {str(e)}")
+    osexit(P_EXIT_FAILURE)
 
 # TEST
-# get_source_metadata_manifest_safe(config,P_ID,TITLE)
+# get_source_metadata_manifest_safe(config,P_ID,TITLE,PLATFORM)
 
 
 # REQ 20230801004 Downloads additional metadata files required by stac-tools
@@ -404,10 +471,18 @@ def get_product_metadata(config,P_ID):
 # product type.
 # READS AND PARSES manifest.safe, extracts metadata filenames and paths
 # print(ID)
-def get_source_metadata_all(ID,TITLE):
-  #os.makedirs(FDIR_OUT+TITLE,exist_ok=True) # UNSAFE
-  mnfst=fread(TITLE+os.sep+"manifest.safe")
-  #fwrite(ID+os.sep+"manifest.safe",mnfst)
+def get_source_metadata_all(ID,TITLE,PLATFORM):
+  FNAME_MANIFEST=platform2fname_manifest(ID,PLATFORM,TITLE)
+  # UNSAFE # 20231030
+  os.makedirs(FDIR_OUT+TITLE,exist_ok=True) 
+  fname_manifest=FNAME_MANIFEST
+  plog("MANIFEST READ: "+TITLE+os.sep+FNAME_MANIFEST)
+  try:
+    mnfst=fread(TITLE+os.sep+FNAME_MANIFEST)
+  except Exception as e:
+    plog("[!][ RS ERR ][ MANIFEST SAFE NOT READY ]")
+    osexit(P_EXIT_FAILURE)
+  #fwrite(ID+os.sep+FNAME_MANIFEST,mnfst)
   src_mnfst = bs.BeautifulSoup(mnfst,features="xml")
   #for val in src_mnfst.find_all('entry')[:3]: # LIMITED
   #  pass
@@ -549,19 +624,19 @@ def cmd_stac(params):
 # ERR: stac-tools returns: SyntaxError: prefix 'n1' not found in prefix map
 # WARNINGS: FixWindingWarning: The exterior ring of this shape is wound clockwise. 
 # '/mnt/sdb1/DHusTools/tmp/mp-sentinel-2-l2a/metadata.xml'
-def run_stac_tools(STAC_BIN,platform,title,SRC_DIR="."):
-  #plog(str(title))
+def run_stac_tools(STAC_BIN,platform,title,SRC_DIR="./"):
+  plog("[I] TITLE TO RUN STAC TOOLS: "+str(title))
   #TBD: Explore windingw no fix
   params=[]
   # 20230921
   if platform == "S1":
-    params=[ STAC_BIN, 'sentinel1', 'grd','create-item', FDIR_OUT+title, FDIR_OUT+SRC_DIR ]
+    params=[ STAC_BIN, 'sentinel1', 'grd','create-item', title, SRC_DIR ]
   elif platform == "S2":
     params=[ STAC_BIN, 'sentinel2', 'create-item', title, SRC_DIR]
   elif platform == "S3":
-    params=[ STAC_BIN, 'sentinel3', 'create-item', FDIR_OUT+title,FDIR_OUT+SRC_DIR]
+    params=[ STAC_BIN, 'sentinel3', 'create-item', title, SRC_DIR]
   elif platform == "S5":
-    params=[ STAC_BIN, 'sentinel5p', 'create-item', FDIR_OUT+title,FDIR_OUT+SRC_DIR]
+    params=[ STAC_BIN, 'sentinel5p', 'create-item', title, SRC_DIR]
   plog("CALL STAC: "+str(' '.join(params)))
   #cmdres=cmd_stac(['ls','-l'])
   cmdres=cmd_stac(params)
@@ -794,13 +869,19 @@ def get_product_name_by_id(pro_meta):
     pro_meta_arr=bs.BeautifulSoup(pro_meta,features="xml")
     for val in pro_meta_arr.find_all('properties'):
       for v in val.find_all('Name'):
-        #plog("PROD NAME: "+v.get_text())
+        plog("PROD NAME: "+v.get_text())
         SID=v.get_text()
     return(SID)
   except Exception as e:
     plog(e)
     plog("[!] Cannot read product from "+HOST)
-    exit(P_EXIT_FAILURE)
+    osexit(P_EXIT_FAILURE)
+
+def rmlock():
+  try:
+    os.remove(FDIR_OUT+FNAME_LOCK)
+  except Exception as e:
+    plog("[ ERR RS-0010 ][!][ CANNOT REMOVE THE LOCK FILE ]")
 
 
 # source info api print
@@ -816,252 +897,338 @@ def main():
   #
   # MAIN RUNTIME
   #
-
   #
-  # VARIABLES
-  #
-  SRC_PROD_ID=None
-  
   # MAIN ERROR RETURN CODE
+  #
   P_EXIT_FAILURE=1
 
-  # FILE VARIABLES
-  SRC_PROD_ID=proc_cmd_opts()
-  check_source_id(SRC_PROD_ID)
-  
-  # READ THE CONFIGURATION
-  config=read_ini()
-  #res=test_target_url(config)
-
-  # STAC_BIN='/opt/conda/bin/stac' # egi notebooks
-  home_folder = os.getenv('HOME')
-  # common pip local install
-  #STAC_BIN=home_folder+'/.local/bin/stac' 
-  STAC_BIN='/usr/local/bin/stac' 
-  
-  DST_COL_TEST_PREFIX="mp-"
-
-  SRC_URL=config["source"]["url"] 
-  DST_URL=config["target"]["url"]
-  #STACHOST=config["target"]["url"]
-  #P_ID=ID
-  TMP="/tmp"
-  SUCCPREFIX="/var/tmp/register-stac-success-"
-  ERRPREFIX="/var/tmp/register-stac-error-"
-  SALT="dhr1"
-  sub_url = "/collections"
-  
-  plog("[*] SRC_URL: "+SRC_URL)
-  plog("[*] DST URL: "+DST_URL)
-  
   #
-  # Retrieve product metadata from source
+  # INITIALIZATION ROUTINES [ lock file test and write ]
   #
-  pro_meta=get_product_metadata(config,SRC_PROD_ID)
-  
-  SRC_PROD_NAME=None
-
-  # ADV DEBUG 
-  # plog(pro_meta)
-  SRC_PROD_NAME=get_product_name_by_id(pro_meta)
-  PLATFORM=SRC_PROD_NAME[:2] 
-  TITLE=SRC_PROD_NAME+".SAFE"
-  
-  #PLATFORM=SID[:2] # TBD REVIEW HERE
-  # ? from CID,PLATFORM,titles=update_source_metadata_nodexml("node.xml")
-
-  # DEBUG RUNTIME CHECK 
-  plog("SOURCE PRODUCT ID   : " + SRC_PROD_ID)
-  plog("SOURCE PRODUCT NAME : " + SRC_PROD_NAME)
-  plog("SOURCE USER         : " + config["source"]["username"])
-  plog("SOURCE HOST         : " + SRC_URL) 
-  plog("TARGET USER         : " + config["target"]["username"])
-  plog("TARGET HOST         : " + DST_URL)
-  plog("TITLE               : " + TITLE)
-  plog("PLATFORM            : " + PLATFORM)
+  dec_proc_run=fexists(FNAME_LOCK) # TEST IF THE FILE EXISTS
+  if dec_proc_run == 1:
+    plog(f"[*][ register-stack.lock file present in {FDIR_OUT} ]")
+    osexit(P_EXIT_FAILURE)
 
   #
-  # TEST SOURCE AND TARGET AVAILABILITY
+  # GET CURRENT PROCESS ID
   #
+  try: # OS DEPENDEND
+    pid = os.getpid()
+  except Exceptions as e:
+    plog("[*][ CURRENT PROCESS OPERATING SYSTEM ID: "+str(pid))
   
-  tra=test_resto_api(config)
-  if "stac_version" in tra:
-    plog("STAC VERSION: "+tra["stac_version"])
-    plog("TARGET SERVER UP")
-  
+  #
+  # WRITE DOWN THE LOCK
+  #
+  try: # OS DEPENDEND
+    fwrite(FNAME_LOCK,str(pid)) # WRITE DOWN THE LOCK FILE
+  except Exceptions as e:
+    plog("[*][ CANNOT START THE PROGRAM.")
 
-  # TBD REVIEW  
-  # res=test_url_routines(config)
-  
-  #
-  # get source manifest.safe
-  #
-  #
-  plog("get_source_metadata_manifest_safe(config,SRC_PROD_ID,TITLE)")
-  get_source_metadata_manifest_safe(config,SRC_PROD_ID,TITLE)
+  # MAIN PROGRAM TRY
+  try:
+    #
+    # VARIABLES
+    #
+    SRC_PROD_ID=None
+    
+    # FILE VARIABLES
+    SRC_PROD_ID=proc_cmd_opts()
+    check_source_id(SRC_PROD_ID)
+    
+    # READ THE CONFIGURATION
+    config=read_ini()
+    #res=test_target_url(config)
+
+    home_folder = os.getenv('HOME')
+    # common pip local install
+    # EGI notebooks
+    # STAC_BIN='/opt/conda/bin/stac' 
+    # STAC_BIN=home_folder+'/.local/bin/stac' 
+    STAC_BIN='/usr/local/bin/stac' 
+    
+    DST_COL_TEST_PREFIX="mp-"
+
+    SRC_URL=config["source"]["url"] 
+    DST_URL=config["target"]["url"]
+    #STACHOST=config["target"]["url"]
+    #P_ID=ID
+    TMP="/tmp"
+    SUCCPREFIX="/var/tmp/register-stac-success-"
+    ERRPREFIX="/var/tmp/register-stac-error-"
+    SALT="dhr1"
+    sub_url = "/collections"
+    
+    #plog("[*] SRC_URL: "+SRC_URL)
+    #plog("[*] DST URL: "+DST_URL)
+    
+    #
+    # Retrieve product metadata from source
+    #
+    pro_meta=get_product_metadata(config,SRC_PROD_ID)
+    
+    SRC_PROD_NAME=None
+
+    # ADV DEBUG 
+    # plog(pro_meta)
+    SRC_PROD_NAME=get_product_name_by_id(pro_meta)
+    PLATFORM=SRC_PROD_NAME[:2] 
+    TITLE=SRC_PROD_NAME+".SAFE"
+    
+    # PLATFORM=SID[:2] # TBD REVIEW HERE
+    # ? from CID,PLATFORM,titles=update_source_metadata_nodexml("node.xml")
+
+    # DEBUG RUNTIME CHECK 
+    plog("[S] SOURCE PRODUCT ID   : " + SRC_PROD_ID)
+    plog("[S] SOURCE PRODUCT NAME : " + SRC_PROD_NAME)
+    plog("[S] SOURCE USER         : " + config["source"]["username"])
+    plog("[S] SOURCE HOST         : " + SRC_URL) 
+    plog("[T] TARGET USER         : " + config["target"]["username"])
+    plog("[T] TARGET HOST         : " + DST_URL)
+    plog("[I] TITLE               : " + TITLE)
+    plog("[I] PLATFORM            : " + PLATFORM)
+
+    #
+    # TEST SOURCE AND TARGET AVAILABILITY [ TESTS ONLY? 20231030 ]
+    #
+    
+    #tra=test_resto_api(config)
+    #if "stac_version" in tra:
+    #  plog("STAC VERSION: "+tra["stac_version"])
+    #  plog("TARGET SERVER UP")
+    
+
+    # TBD REVIEW  
+    # res=test_url_routines(config)
+    
+    #
+    # get source manifest.safe
+    #
+    #
+
+    get_source_metadata_manifest_safe(config,SRC_PROD_ID,TITLE,PLATFORM)
+    plog("[*] EVENT: has source metadata manifest safe")
+    
+    # retrieve all source metadata
+
+    ## Get manifest
+    #
+    #if [ "$PLATFORM" == "S1" -o "$PLATFORM" == "S2" ]; then
+    #        MANIFEST="${TITLE}/manifest.safe"
+    #        curl ${OS_ACCESS_TOKEN:+-H "Authorization: Bearer $OS_ACCESS_TOKEN"} -n -o "${MANIFEST}" "${PREFIX}/Nodes(%27manifest.safe%27)/%24value"
+    #elif [ "$PLATFORM" == "S3" -o "$PLATFORM" == "S3p" ]; then
+    #        MANIFEST="${TITLE}/xfdumanifest.xml"
+    #        curl ${OS_ACCESS_TOKEN:+-H "Authorization: Bearer $OS_ACCESS_TOKEN"} -n -o "${MANIFEST}" "${PREFIX}/Nodes(%27xfdumanifest.xml%27)/%24value"
+    #else
+    #        MANIFEST="${TITLE}"
+    #        rmdir "${TITLE}"
+    #        curl ${OS_ACCESS_TOKEN:+-H "Authorization: Bearer $OS_ACCESS_TOKEN"} -n -o "${MANIFEST}" "${PREFIX}/%24value"
+    #fi
+
+    # metadata=get_source_metadata_all(SRC_PROD_NAME,TITLE,PLATFORM)
+
+
+    # plog(metadata)
+
+    # download node.xml from source
+    gsm=get_source_metadata(config,SRC_PROD_ID)
+    #plog("GSM: "+gsm)
+    plog("[I] GSM DOWNLOADED")
+    if (gsm):
+      # fnodexml=os.sep+TITLE+os.sep+"node.xml" # n1 bug at the stac runtime
+      fnodexml="node.xml"
+      fwrite(fnodexml,str(gsm)) # HERE
+    else:
+      plog("Get Source Metadata Returns No Data.")
+    #plog(fnodexml)
+    #plog("GSM DOWNLOADED :" + str(gsm))
+    plog("[*] GSM DOWNLOADED")
+    
+
+    #
+    # Update node.xml source metadata
+    #
+    titles=update_source_metadata_nodexml(fnodexml)
+
+    # ADV DEBUG
+    # plog("P_ID "+SRC_PROD_ID)
+    # plog("TITLE "+TITLE)
+    # plog("titles"+str(titles))
+    # plog(SRC_PROD_ID)
+
+    # plog("titles: "+str(titles)+" "+SRC_PROD_ID)
+    # plog("SRC_PRODUCT_NAME: "+SRC_PROD_NAME)
+    # PLATFORM=P_ID[0:2]
+
+    #
+    # GET DESTIONATION COLLECTION ID FROM PRODUCT ID
+    #
+    DST_COLLECTION=translate_prod2col(titles,PLATFORM)
+
+    plog("DST_COLLECTION: " + DST_COLLECTION)
+
+    # PLACEHOLDER FOR FIXED PROC_CMD_OPTS
+    
+    #
+    # Get the manifest.safe
+    #
+    #get_source_metadata_manifest_safe(config,SRC_PROD_ID,TITLE)
+
+    #
+    # GET ALL SOURCE METADATA - only for given sentinels
+    #
+    if PLATFORM == "S1" or PLATFORM == "S2":
+      src_fnames,src_paths=get_source_metadata_all(SRC_PROD_NAME,TITLE)
+      #metadata=get_source_metadata_all(SRC_PROD_NAME,TITLE,PLATFORM,TITLE)
+
+      # ADV DEBUG 
+      # plog(src_fnames[:3])
+      # plog(src_paths[:3])
+      
+      #
+      # Patch the metadata
+      #
+      # #src_names,urls = metadata_json_patch(config,server,src_fnames,src_paths,PROD_ID,NODE_NAME,prev_prod="'MTD_MSIL2A.xml'"):
+      urls2,src_fpaths2,src_fnames2=metadata_json_patch(config,SRC_URL,src_fnames,src_paths,SRC_PROD_ID,TITLE)
+    
+      #plog("URLS2: "+str(urls2))
+      get_metadata_file(TITLE,config,urls2,src_fpaths2,src_fnames2)
+
+      plog("src_fanems[:3} "+str(src_fnames[:3]))
+      plog("src_fpaths[:3] "+str(src_fpaths2[:3]))
+      plog("urls2[:3] "+str(urls2[:3]))
+    # DEBUG ID AND NAMES
+    #
+    plog("SOURCE PRODUCT ID: "+SRC_PROD_ID)
+    plog("DST_COLLECTION: "+DST_COLLECTION)
+    plog("PLATFORM: "+PLATFORM)
+    #
+    # Translate source product ID to target collection ID
+    #
+    # TBD REVIEW HERE CHECK IF COLLECTION EXISTS IN TARGET
+    #
+    DST_COLLECTION=translate_prod2col(titles,DST_COL_TEST_PREFIX)
+
+    #
+    # Run the stac tools [ TBD REVIEW TEST ONLY FOR S2A 20231018 ]
+    #
+    TITLE=titles[0]
+    #SRC_DIR="./tmp"
+    plog("STAC_BIN: "+STAC_BIN)
+    plog("PLATFORM: "+PLATFORM)
+    plog("TITLE: "+TITLE)
+    plog("DST_COLLECTION: "+DST_COLLECTION)
+
+    # RUN THE STAC TOOLS
+    SRC_DIR="." # this supposes the os.chdir
+    plog("SRC_DIR: "+SRC_DIR)
+    os.chdir(FDIR_OUT)
+    run_stac_tools(STAC_BIN,PLATFORM,TITLE,".")
+    
+    #  
+    # Get the latest json [ TBD REVIEW TEST ONLY FOR S2A 20231018 ]
+    #
+    fname=get_json_ls("./",PLATFORM) # TBD REVIEW
+    fname_out="resto-test_upload.json" # TBD REVIEW
+    plog("fname:"+fname)
+    plog("fname out: "+fname_out)
+    
+    # 
+    # Patch the JSON
+    # 
+    update_json_hrefs(fname,fname_out,SRC_PROD_ID)
+
+    #
+    # VERIFY UPLOAD INFO
+    #
+
+    plog("[i] UPLOAD READY") 
+    plog("[+] RESULT: ")
+    dbg_fname_upload=fname_out
+    dbg_src_url=config['source']['url']
+    dbg_src_user=config['source']['username']
+    dbg_src_prod_id=SRC_PROD_ID
+    dbg_src_prod_name=SRC_PROD_NAME
+    dbg_dst_url=config['target']['url']
+    dbg_dst_user=config['target']['username']
+    dbg_dst_collection=DST_COLLECTION
+    dbg_dst_platform=PLATFORM
+
+    plog("[ ] SRC URL: "+dbg_src_url)
+    plog("[ ] SRC USR: "+dbg_src_user)
+    plog("[ ] SRC PID: "+dbg_src_prod_id)
+    plog("[ ] SRC NAM: "+dbg_src_prod_name)
+    plog("[ ] DST URL: "+dbg_dst_url)
+    plog("[ ] DST USR: "+dbg_dst_user)
+    plog("[ ] DST COL: "+dbg_dst_collection)
+    plog("[ ] DST PFR: "+dbg_dst_platform)
+ 
+ 
+    #
+    # WRITE OPERATION [ UPLOAD TO RESTO ]
+    #
+    #upload_res=upload_collection(config,fname_out,DST_COLLECTION+"",PLATFORM)
+    upload_res=upload_collection(config,fname_out,DST_COLLECTION,PLATFORM)
+
+    # DEBUG plog(upload_res)
+    
+    # UPLOAD RETURN VALUES
+    #print(upload_res)
+    if "ErrorMessage" in upload_res:
+        plog(upload_res)
+        plog(upload_res["ErrorMessage"])
+        if "ErrorCode" in upload_res:
+          plog("[!] Upload Error Code: #"+str(upload_res["ErrorCode"]))
+          # P_EXIT_FAILURE=int(upload_res["ErrorCode"]) # NOTE 20231017 from man
+          osexit(P_EXIT_FAILURE)
+    if "status" in upload_res:
+      if upload_res["status"]=="success":
+        plog("[*] uploaded status: "+str(upload_res["status"]))
+        plog("[*] uploaded inserted: "+str(upload_res["inserted"]))
+        plog("[*] uploaded inError: "+str(upload_res["inError"]))
+        plog("[*] uploaded featureId: "+upload_res["features"][0]["featureId"])
+        plog("[*] uploaded productIdentified: "+upload_res["features"][0]["productIdentifier"])
+        plog("[*] uploaded erorrs: "+str(upload_res["errors"]))
+        plog("[+] UPLOAD O.K.")
+        f=open("upload_"+upload_res["features"][0]["productIdentifier"]+".log","w")
+        f.write(json.dumps(upload_res))
+        f.close()
+    
+    #basicauth=None
+    if "status" in upload_res:
+      #resto_url="resto-test.c-scale.zcu.cz"
+      resto_url = "https://"+config["target"]["url"]
+      sub_url="/collections/"+DST_COLLECTIONS+"/"+"items/"+upload_res["features"][0]["featureId"]
+      headers = {"Content-Type": "application/json; charset=utf-8"}
+      ruser=config['target']['username'].strip()
+      rpass=config['target']['password'].strip()
+      # print(ruser+" "+rpass) # DEBUG
+      basicauth=HTTPBasicAuth(ruser, rpass)
+      plog(resto_url+sub_url)
+      resp = requests.get(resto_url+sub_url,headers=headers,auth=basicauth)
+      #print(resp.text) # DEBUG
+      upload_verify_res=json.loads(resp.text)
+      if "id" in upload_verify_res:
+        if upload_verify_res["id"]==upload_res["features"][0]["featureId"]:
+          plog("[+] UPLOAD VERIFY O.K.")
+    else:
+      plog("[*] Not verifyng upload.")
+    
+    plog("[+] PROGRAM COMPLETED. Exiting...")
+
+    # REMOVE THE LOCK FILE
+    rmlock()
+    # RETURN CONTROL TO SHELL
+    osexit(P_EXIT_SUCESS) # 20231016
+  except Exception as e:
+    if e is None:
+      e=str("Undef")
+      exc_handl(e,"[ ERR RS-1000 ][!][ FAILURE IN MAIN. ]")
+    # REMOVE THE LOCK FILE
+    rmlock()
+    # RETURN CONTROL TO SHELL
+    osexit(P_EXIT_FAILURE) # 20231016
 
   
-  # retrieve all source metadata
-  metadata=get_source_metadata_all(SRC_PROD_NAME,TITLE)
-
-  # plog(metadata)
-
-  # download node.xml from source
-  gsm=get_source_metadata(config,SRC_PROD_ID)
-  plog("GSM: "+gsm)
-  if (gsm):
-    # fnodexml=os.sep+TITLE+os.sep+"node.xml" # n1 bug at the stac runtime
-    fnodexml="node.xml"
-    fwrite(fnodexml,str(gsm)) # HERE
-  else:
-    plog("Get Source Metadata Returns No Data.")
-  plog(fnodexml)
-  plog("GSM:" + str(gsm))
-  
-  #
-  # Update node.xml source metadata
-  #
-  titles=update_source_metadata_nodexml(fnodexml)
-
-  # ADV DEBUG
-  # plog("P_ID "+SRC_PROD_ID)
-  # plog("TITLE "+TITLE)
-  # plog("titles"+str(titles))
-  # plog(SRC_PROD_ID)
-
-  # plog("titles: "+str(titles)+" "+SRC_PROD_ID)
-  # plog("SRC_PRODUCT_NAME: "+SRC_PROD_NAME)
-  # PLATFORM=P_ID[0:2]
-
-  #
-  # GET DESTIONATION COLLECTION ID FROM PRODUCT ID
-  #
-  DST_COLLECTION=translate_prod2col(titles,PLATFORM)
-
-  plog("DST_COLLECTION: " + DST_COLLECTION)
-
-  
-  # PLACEHOLDER FOR FIXED PROC_CMD_OPTS
-  
-  #
-  # Get the manifest.safe
-  #
-  #get_source_metadata_manifest_safe(config,SRC_PROD_ID,TITLE)
-
-  #
-  # GET ALL SOURCE METADATA
-  #
-  src_fnames,src_paths=get_source_metadata_all(SRC_PROD_NAME,TITLE)
-
-
-  # ADV DEBUG 
-  #plog(src_fnames[:3])
-  #plog(src_paths[:3])
-  
-  #
-  # Patch the metadata
-  #
-  # #src_names,urls = metadata_json_patch(config,server,src_fnames,src_paths,PROD_ID,NODE_NAME,prev_prod="'MTD_MSIL2A.xml'"):
-  urls2,src_fpaths2,src_fnames2=metadata_json_patch(config,SRC_URL,src_fnames,src_paths,SRC_PROD_ID,TITLE)
-  
-  #plog("URLS2: "+str(urls2))
-  get_metadata_file(TITLE,config,urls2,src_fpaths2,src_fnames2)
-  #
-  # DEBUG ID AND NAMES
-  #
-  plog("SOURCE PRODUCT ID: "+SRC_PROD_ID)
-  plog("DST_COLLECTION: "+DST_COLLECTION)
-  plog("PLATFORM: "+PLATFORM)
-  plog("src_fanems[:3} "+str(src_fnames[:3]))
-  plog("src_fpaths[:3] "+str(src_fpaths2[:3]))
-  plog("urls2[:3] "+str(urls2[:3]))
-  #
-  # Translate source product ID to target collection ID
-  #
-  # TBD REVIEW HERE CHECK IF COLLECTION EXISTS IN TARGET
-  #
-  DST_COLLECTION=translate_prod2col(titles,DST_COL_TEST_PREFIX)
-
-  #
-  # Run the stac tools [ TBD REVIEW TEST ONLY FOR S2A 20231018 ]
-  #
-  TITLE=titles[0]
-  #SRC_DIR="./tmp"
-  plog("STAC_BIN: "+STAC_BIN)
-  plog("PLATFORM: "+PLATFORM)
-  plog("TITLE: "+TITLE)
-  plog("DST_COLLECTION: "+DST_COLLECTION)
-
-  # RUN THE STAC TOOLS
-  SRC_DIR="." # this supposes the os.chdir
-  plog("SRC_DIR: "+SRC_DIR)
-  os.chdir(FDIR_OUT)
-  run_stac_tools(STAC_BIN,PLATFORM,TITLE,".")
-  
-  #  
-  # Get the latest json [ TBD REVIEW TEST ONLY FOR S2A 20231018 ]
-  #
-  fname=get_json_ls("./",PLATFORM) # TBD REVIEW
-  fname_out="resto-test_upload.json" # TBD REVIEW
-  plog("fname:"+fname)
-  plog("fname out: "+fname_out)
-  
-  # 
-  # Patch the JSON
-  # 
-  update_json_hrefs(fname,fname_out,SRC_PROD_ID)
-  
-  #
-  # WRITE OPERATION [ UPLOAD TO RESTO ]
-  #
-  #upload_res=upload_collection(config,fname_out,DST_COLLECTION+"",PLATFORM)
-  upload_res=upload_collection(config,fname_out,DST_COLLECTION,PLATFORM)
-
-  # DEBUG plog(upload_res)
-  
-  # UPLOAD RETURN VALUES
-  #print(upload_res)
-  if "ErrorMessage" in upload_res:
-      plog(upload_res)
-      plog(upload_res["ErrorMessage"])
-      if "ErrorCode" in upload_res:
-        plog("[!] Upload Error Code: #"+str(upload_res["ErrorCode"]))
-        # P_EXIT_FAILURE=int(upload_res["ErrorCode"]) # NOTE 20231017 from man
-        exit(P_EXIT_FAILURE)
-  if "status" in upload_res:
-    if upload_res["status"]=="success":
-      plog("[*] uploaded status: "+str(upload_res["status"]))
-      plog("[*] uploaded inserted: "+str(upload_res["inserted"]))
-      plog("[*] uploaded inError: "+str(upload_res["inError"]))
-      plog("[*] uploaded featureId: "+upload_res["features"][0]["featureId"])
-      plog("[*] uploaded productIdentified: "+upload_res["features"][0]["productIdentifier"])
-      plog("[*] uploaded erorrs: "+str(upload_res["errors"]))
-      plog("[+] UPLOAD O.K.")
-      f=open("upload_"+upload_res["features"][0]["productIdentifier"]+".log","w")
-      f.write(json.dumps(upload_res))
-      f.close()
-  
-  #basicauth=None
-  if "status" in upload_res:
-    #resto_url="resto-test.c-scale.zcu.cz"
-    resto_url = "https://"+config["target"]["url"]
-    sub_url="/collections/"+DST_COLLECTIONS+"/"+"items/"+upload_res["features"][0]["featureId"]
-    headers = {"Content-Type": "application/json; charset=utf-8"}
-    ruser=config['target']['username'].strip()
-    rpass=config['target']['password'].strip()
-    # print(ruser+" "+rpass) # DEBUG
-    basicauth=HTTPBasicAuth(ruser, rpass)
-    plog(resto_url+sub_url)
-    resp = requests.get(resto_url+sub_url,headers=headers,auth=basicauth)
-    #print(resp.text) # DEBUG
-    upload_verify_res=json.loads(resp.text)
-    if "id" in upload_verify_res:
-      if upload_verify_res["id"]==upload_res["features"][0]["featureId"]:
-        plog("[+] UPLOAD VERIFY O.K.")
-  else:
-    plog("[*] Not verifyng upload.")
-  
-  plog("[+] PROGRAM COMPLETED. Exiting...")
-  
-  exit(P_EXIT_SUCESS) # 20231016
-  
+main()
