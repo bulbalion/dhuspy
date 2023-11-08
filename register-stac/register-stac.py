@@ -24,12 +24,7 @@ Changes:
 20231020 test result edits
 20231101 batch test result edits
 20231102 batch test result edits
-20231003 Config review, reupload, different maps testing
-20231004 minor bug-fixing
-20231016 conversion to py, v 0.0.2
-20231017 test result edits
-20231018 test result edits
-20231020 test result edits
+20231107 batch test result edits
 20231108 binary stream hanlder, tests src sync
 
 Description:
