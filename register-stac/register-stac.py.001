@@ -3,10 +3,10 @@
 
 PROGRAM_HEADER="""
 
-VERSION: 0.0.1e
+VERSION: 0.0.1d
 
-Last Update: 20231108
-Last Change: download core rewrite dev backup
+Last Update: 20231101
+Last Change: test result edits
 
 Changes:
 20230801 Initial version
@@ -23,29 +23,21 @@ Changes:
 20231018 test result edits
 20231020 test result edits
 20231101 batch test result edits
-20231102 batch test result edits
-20231107 batch debug test result edits
-20231108 download core rewrite dev backup
 
 Description:
 
 DHR1 TO RESTO REWRITTEN: register-stac.sh from DHusTools
 
-Prereqs:
-
-# pip install stactools stactools-sentinel2 stactools-sentinel3 stactools-sentinel5p
-
 """
 
 
 # PLOG MSG TYPES
-MTRACE=3
 MDEBUG=2
 MINFO=1
 MWARNING=0
 
 # INPUT: dhr1 xml files processed by stac tools uploaded to resto catalog
-DEBUG=MTRACE # debug level 3 brings tracebacks, 2 additional messages
+DEBUG=MDEBUG # debug leve 3 brings tracebacks, 2 additional messages
 
 # MAX JSON MB PARSE
 MAX_JSON_PARSE=16 # 16 MB
@@ -58,9 +50,6 @@ P_EXIT_FAILURE=1
 # CHANGE HERE DOWNLOAD DATA DIRECTORY
 FDIR_OUT="/home/debian/dev/dhuspy/register-stac/tmp/"
 FNAME_LOCK="register-stac.lock"
-
-# DOWNLOAD TIMEOUT
-DOWNLOAD_TIMEOUT=4096
 
 # IMPORTS
 import bs4 as bs
@@ -91,8 +80,7 @@ def fread(file):
 
 # REQ 20230801002 Obtains metadata for the given product from DHuS storage | 002
 # save node.xml
-def fwrite(file,txt,bin=False):
-  #  f=open(FDIR_OUT+file,'wb')
+def fwrite(file,txt):
   f=open(FDIR_OUT+file,'w')
   f.write(txt)
   f.close()
@@ -243,101 +231,52 @@ def check_source_id(src_id):
 def get_api_large_file(url,basicauth,is_stream):
   local_filename = DOWNLOAD_SWAP_FNAME
   # NOTE the stream=True parameter below
-  try:
-    with requests.get(url=url,auth=basicauth,stream=is_stream,timeout=DOWNLOAD_TIMEOUT) as r:
-      r.raise_for_status()
-      with open(local_filename, 'wb') as f:
-        for chunk in r.iter_content(chunk_size=8192): 
-          # If you have chunk encoded response uncomment if
-          # and set chunk_size parameter to None.
-          #if chunk: 
-          f.write(chunk)
-  except Exception as e:
-    plog('[!][ Failed to download the file')
-    plog('[!][ ERROR: '+str(e))
-  return(local_filename)
-
-
-def get_download_link_size(url):
-  resp = request.head(url)
-  print(str(resp.headers))
-  #if download_size > 16*1024*1024:
-  plog("Too large file, exiting")
-  osexit(0)
-
-  site = urllib.urlopen(url)
-  meta = site.info()
-  #download_size = meta.getheaders("Content-Length")[0]
-  plog(f"Content-Length: {download_size}")
-  if download_size > 16*1024*1024:
-    plog("Too large file, exiting")
-    osexit(0)
-
-import requests
-from requests.auth import HTTPBasicAuth
-
-def download_file(url,params,basicauth):
-    resp=""
-    #try:
-    with requests.get(url,params=params,auth=basicauth,stream=True) as r:
-      r.raise_for_status()
-      #with open(fname, 'wb') as f:
+  with requests.get(url=url,auth=basicauth,stream=is_stream) as r:
+    r.raise_for_status()
+    with open(local_filename, 'wb') as f:
       for chunk in r.iter_content(chunk_size=8192): 
         # If you have chunk encoded response uncomment if
         # and set chunk_size parameter to None.
-        if chunk: 
-          resp+=chunk.decode("utf-8") # f.write(chunk)
-    #except Exception as e:
-    #  plog("[*][ NO MORE DATA ON STREAM ]")
-    return(resp)
+        #if chunk: 
+        f.write(chunk)
+  return(local_filename)
 
-#
+
 # def 20231005 revert from rtc try to download data
 def get_api(hostname,sub_url,user=None,password=None,params=dict(),post=False,is_stream=False):
+  #server=hostname
   # VARIABLES
   url='https://'+hostname+sub_url
+  #params = dict()
   data=None
   resp=None
-
-  plog("[w] URL: "+url)
+  # params = dict(
+  #   # key = 'str_value'
+  # )
+  #
+  if DEBUG: plog("[w] URL: "+url)
+  #
 
   try:
-    # GET WEB PAGE HEADER 
-    from requests.auth import HTTPBasicAuth
-    basicauth=HTTPBasicAuth(user, password)
-    resp = requests.head(url,auth=basicauth,params=params)
-
-    # DOWNLOAD SIZE PREDICTION
-    download_size=0
-    if "headers" in resp:
-      if "Content-Lenght" in resp.headers:
-        download_size = resp.headers["Content-Length"][0]
-    plog("[*][ DOWNLOAD SIZE: "+str(download_size)+" ]")
-
-    # HERE 20231107
-    resp=download_file(url,params,basicauth)
-
+    if user:
+      from requests.auth import HTTPBasicAuth
+      basicauth=HTTPBasicAuth(user, password)
+      if post:
+        resp = requests.post(url,"https://"+server)
+      resp = requests.get(url=url,auth=basicauth,params=params)
+    else:
+      resp = requests.get(url=url,params=params)
   except Exception as e:
     # ADV DEBUG: plog(resp)
     exc_handl(e,"[!] Cannot download the result page")
-  #if resp:
-  #  #plog("[O][ RESP[:80]: "+resp[:80])
-  #  #plog("[O][ resp len: "+str(len(resp)))
   # PARSE THE JSON 
   try:
-    #if resp and len(resp.text) < MAX_JSON_PARSE*1024:
-    #resp=resp.decode("utf-8")
-    data=resp
-    if resp and len(resp) < MAX_JSON_PARSE*1024:
-      data = json.loads(resp) # Check the JSON Response Content documentation below
-      #data = resp.json() # Check the JSON Response Content documentation below
+    if resp:
+      data = resp.json() # Check the JSON Response Content documentation below
   except Exception as e:
     #if DEBUG: print(resp.text)
     exc_handl(e,"[!] Cannot parse the json returning the resp.text",warning=False)
-    #if hasattr(resp,'text'):
-    #  return(resp.text)
-    #else:
-    #return(resp)
+    return(resp.text)
   #try:
   #  print(data["title"])
   #except Exception as e:
@@ -402,22 +341,19 @@ def update_source_metadata_nodexml(fname):
   titles=[]
   ids=[]
   #for val in src_xml.find_all('entry')[:3]: # LIMITED
-  id=""
   for val in src_xml.find_all('entry'): # LIMITED
     title=str(val.find('title').get_text())
     titles.append(title)
     plog(title)
     id=str(val.find('id').get_text())
     ids.append(id)
-    plog(id)    
+    #plog(id)    
     break
-  if len(titles)>0:
-    plog("TITLE: "+titles[0])
-  if id:
-    PREFIX=id
+  #plog("TITLE: "+titles[0])
   #ID=titles[0]
   #PLATFORM=ID[0:2]
   #plog("PLATFORM: "+PLATFORM)
+  #PREFIX=id
   #plog("PREFIX: "+PREFIX)
   #PRODUCTURL="/".join(id.split("/")[:-1])
   #plog("PRODUCTURL: "+PRODUCTURL)
@@ -437,19 +373,19 @@ def platform2fname_manifest(P_ID,PLATFORM,TITLE):
   elif PLATFORM == "S3" or PLATFORM == "S3":
     FNAME_MANIFEST="xfdumanifest.xml"
   else:
-    #os.rmdir(TITLE)
-    FNAME_MANIFEST=TITLE
+    FNAME_MANIFEST="manifest.safe"
   return(FNAME_MANIFEST)
 
 def platform2manifest_url(P_ID,TITLE,PLATFORM):
   FNAME_MANIFEST=platform2fname_manifest(P_ID,PLATFORM,TITLE)
   sub_url = "/odata/v1/Products('"+P_ID+"')/Nodes('"+TITLE+"')"+"/"+"Nodes('"+FNAME_MANIFEST+"')/$value"
-  if PLATFORM == "S1" or PLATFORM == "S2" or PLATFORM == "S3":
+  if PLATFORM == "S1" or PLATFORM == "S2" or PLATFORM == "S3" or PLATFORM == "S3p":
     sub_url = "/odata/v1/Products('"+P_ID+"')/Nodes('"+TITLE+"')"+"/"+"Nodes('"+FNAME_MANIFEST+"')/$value"
   else:
-    #sub_url = "/odata/v1/Products('"+P_ID+"')/$value"
-    #sub_url = "/odata/v1/Products('"+P_ID+"')"
+    #sub_url = "/odata/v1/Products('"+P_ID+"')/Nodes('"+TITLE+"')"+"/$value"
     sub_url = "/odata/v1/Products('"+P_ID+"')/$value"
+    sub_url = "/odata/v1/Products('"+P_ID+"')"
+    #plog(sub_url)
   return(sub_url)
 
 
@@ -464,14 +400,15 @@ def platform2manifest_url(P_ID,TITLE,PLATFORM):
 # sed 's/.*href="//' | sed 's/".*//' |
 #
 def get_source_metadata_manifest_safe(config,P_ID,TITLE,PLATFORM):
+  manifest_url=platform2manifest_url(P_ID,TITLE,PLATFORM)
   FNAME_MANIFEST=platform2fname_manifest(P_ID,TITLE,PLATFORM)
-  plog(f"FNAME_MANIFEST {FNAME_MANIFEST}")
-  sub_url=platform2manifest_url(P_ID,TITLE,PLATFORM)
-  plog(f"FNAME_URL {sub_url}")
   server=config["source"]["url"] # REVIEW TBD HERE
-  plog(f"SUB_URL: {server}")
 
-  plog(f"[*] manifest to be retrieved from server: {server} url: {sub_url}")
+  #api_protocol="https://"
+  #server= "dhr1.cesnet.cz"
+  #sub_url = "/odata/v1/Products('"+P_ID+"')/Nodes('"+TITLE+"')"+"/"+"Nodes('"+FNAME_MANIFEST+"')/$value"
+
+  sub_url = manifest_url
   res=get_api(server,sub_url,user=config['source']['username'],password=config['source']['password']) # CONF
   # ADV DEBUG plog(res.split('\n')[:10])
   if res:
@@ -488,16 +425,14 @@ def get_source_metadata_manifest_safe(config,P_ID,TITLE,PLATFORM):
     except:
       plog("[!][S002] PRODUCT DIR ALREADY EXISTS "+TITLE)
     try:
-      #fwrite(TITLE+os.sep+FNAME_MANIFEST,res,bin=True)
-      fwrite(TITLE+os.sep+FNAME_MANIFEST,res)
-      #fwrite(TITLE+os.sep+"manifest.safe",res)
+      #fwrite(TITLE+os.sep+FNAME_MANIFEST,res)
+      fwrite(TITLE+os.sep+"manifest.safe",res)
       plog(f"[o] PLATFORM: {PLATFORM}, FNAME: {FNAME_MANIFEST} file saved.")
     except Exception as e:
-      msg="[*] CANNOT SAVE MANIFEST FILE {FNAME_MANIFEST}"
-      exc_handl(e,msg,warning=True)
+      plog(f"[*] CANNOT SAVE MANIFEST FILE {FNAME_MANIFEST} {str(e)}")
       osexit(P_EXIT_FAILURE)
   else:
-    msg=f"[*] CANNOT SAVE MANIFEST FILE {FNAME_MANIFEST}"
+    plog(f"[*] CANNOT SAVE MANIFEST FILE {FNAME_MANIFEST} Error: {str(e)}")
     osexit(P_EXIT_FAILURE)
 
 # TEST
@@ -1042,8 +977,6 @@ def main():
     
     # PLATFORM=SID[:2] # TBD REVIEW HERE
     # ? from CID,PLATFORM,titles=update_source_metadata_nodexml("node.xml")
-    fnodexml="node.xml"
-    titles=update_source_metadata_nodexml(fnodexml)
 
     # DEBUG RUNTIME CHECK 
     plog("[S] SOURCE PRODUCT ID   : " + SRC_PROD_ID)
@@ -1073,7 +1006,6 @@ def main():
     #
     #
 
-    plog("[*] EVENT: getting source metadata manifest safe")
     get_source_metadata_manifest_safe(config,SRC_PROD_ID,TITLE,PLATFORM)
     plog("[*] EVENT: has source metadata manifest safe")
     
@@ -1111,36 +1043,42 @@ def main():
     #plog(fnodexml)
     #plog("GSM DOWNLOADED :" + str(gsm))
     plog("[*] GSM DOWNLOADED")
+    
+
+    #
+    # Update node.xml source metadata
+    #
+    titles=update_source_metadata_nodexml(fnodexml)
+
+    # ADV DEBUG
+    # plog("P_ID "+SRC_PROD_ID)
+    # plog("TITLE "+TITLE)
+    # plog("titles"+str(titles))
+    # plog(SRC_PROD_ID)
+
+    # plog("titles: "+str(titles)+" "+SRC_PROD_ID)
+    # plog("SRC_PRODUCT_NAME: "+SRC_PROD_NAME)
+    # PLATFORM=P_ID[0:2]
+
+    #
+    # GET DESTIONATION COLLECTION ID FROM PRODUCT ID
+    #
+    DST_COLLECTION=translate_prod2col(titles,PLATFORM)
+
+    plog("DST_COLLECTION: " + DST_COLLECTION)
 
     # PLACEHOLDER FOR FIXED PROC_CMD_OPTS
     
     #
     # Get the manifest.safe
     #
-    # get_source_metadata_manifest_safe(config,SRC_PROD_ID,TITLE)
+    #get_source_metadata_manifest_safe(config,SRC_PROD_ID,TITLE)
 
     #
     # GET ALL SOURCE METADATA - only for given sentinels
     #
     if PLATFORM == "S1" or PLATFORM == "S2":
-      #
-      # Update node.xml source metadata
-      #
-      titles=update_source_metadata_nodexml(fnodexml)
- 
-      # ADV DEBUG
-      plog("P_ID "+SRC_PROD_ID)
-      plog("TITLE "+TITLE)
-      plog("titles"+str(titles))
-      plog(SRC_PROD_ID)
-
-      #
-      # GET DESTIONATION COLLECTION ID FROM PRODUCT ID
-      #
-      DST_COLLECTION=translate_prod2col(titles,PLATFORM)
-      plog("DST_COLLECTION: " + DST_COLLECTION)
- 
-      src_fnames,src_paths=get_source_metadata_all(SRC_PROD_NAME,TITLE,PLATFORM)
+      src_fnames,src_paths=get_source_metadata_all(SRC_PROD_NAME,TITLE)
       #metadata=get_source_metadata_all(SRC_PROD_NAME,TITLE,PLATFORM,TITLE)
 
       # ADV DEBUG 
@@ -1152,21 +1090,13 @@ def main():
       #
       # #src_names,urls = metadata_json_patch(config,server,src_fnames,src_paths,PROD_ID,NODE_NAME,prev_prod="'MTD_MSIL2A.xml'"):
       urls2,src_fpaths2,src_fnames2=metadata_json_patch(config,SRC_URL,src_fnames,src_paths,SRC_PROD_ID,TITLE)
-
+    
       #plog("URLS2: "+str(urls2))
       get_metadata_file(TITLE,config,urls2,src_fpaths2,src_fnames2)
 
       plog("src_fanems[:3} "+str(src_fnames[:3]))
       plog("src_fpaths[:3] "+str(src_fpaths2[:3]))
       plog("urls2[:3] "+str(urls2[:3]))
-
-    if titles:
-      if len(titles)>0:
-        SRC_PROD_NAME=titles[0]
-    #if not titles:
-    #  DST_COLLECTION=translate_prod2col(SRC_PROD_NAME,PLATFORM)
-    #else:
-    DST_COLLECTION=translate_prod2col(SRC_PROD_NAME,DST_COL_TEST_PREFIX)
     # DEBUG ID AND NAMES
     #
     plog("SOURCE PRODUCT ID: "+SRC_PROD_ID)
@@ -1177,30 +1107,23 @@ def main():
     #
     # TBD REVIEW HERE CHECK IF COLLECTION EXISTS IN TARGET
     #
+    DST_COLLECTION=translate_prod2col(titles,DST_COL_TEST_PREFIX)
 
     #
     # Run the stac tools [ TBD REVIEW TEST ONLY FOR S2A 20231018 ]
     #
-    #TITLE=titles[0]
-    TITLE=SRC_PROD_NAME+".SAFE"
+    TITLE=titles[0]
     #SRC_DIR="./tmp"
     plog("STAC_BIN: "+STAC_BIN)
     plog("PLATFORM: "+PLATFORM)
     plog("TITLE: "+TITLE)
     plog("DST_COLLECTION: "+DST_COLLECTION)
 
-    # PATCH 20231106
-    #if PLATFORM == "S5":
-    #  plog("Not Patching TITLE: "+TITLE)
-    #  if "." in TITLE:
-    #    TITLE=TITLE.split(".")[0]+".SAFE"
-    #  plog("Not Patching TITLE: "+TITLE)
-
     # RUN THE STAC TOOLS
-    SRC_DIR="./" # this supposes the os.chdir
+    SRC_DIR="." # this supposes the os.chdir
     plog("SRC_DIR: "+SRC_DIR)
     os.chdir(FDIR_OUT)
-    run_stac_tools(STAC_BIN,PLATFORM,TITLE,SRC_DIR)
+    run_stac_tools(STAC_BIN,PLATFORM,TITLE,".")
     
     #  
     # Get the latest json [ TBD REVIEW TEST ONLY FOR S2A 20231018 ]
@@ -1302,7 +1225,6 @@ def main():
       e=str("Undef")
       exc_handl(e,"[ ERR RS-1000 ][!][ FAILURE IN MAIN. ]")
     # REMOVE THE LOCK FILE
-    exc_handl(e,"[ ERR RS-0000 ][!][ FAILURE IN MAIN. ]")
     rmlock()
     # RETURN CONTROL TO SHELL
     osexit(P_EXIT_FAILURE) # 20231016
