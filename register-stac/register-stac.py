@@ -3,9 +3,9 @@
 
 PROGRAM_HEADER="""
 
-VERSION: 0.0.1f
+VERSION: 0.0.1d
 
-Last Update: 20231108
+Last Update: 20231107
 Last Change: batch debug test result edits
 
 Changes:
@@ -25,8 +25,6 @@ Changes:
 20231101 batch test result edits
 20231102 batch test result edits
 20231107 batch debug test result edits
-20231108 download core rewrite dev backup
-20231108 test res: s2 to stac create item   
 
 Description:
 
@@ -34,7 +32,11 @@ DHR1 TO RESTO REWRITTEN: register-stac.sh from DHusTools
 
 Prereqs:
 
-# pip install stactools-sentinel2 stactools-sentinel3 stactools-sentinel5p
+# pip install stactools stactools-sentinel2 stactools-sentinel3 stactools-sentinel5p
+
+TBD:
+
+[*] post request reimplementation
 
 """
 
@@ -93,8 +95,10 @@ def fread(file):
 # REQ 20230801002 Obtains metadata for the given product from DHuS storage | 002
 # save node.xml
 def fwrite(file,txt,bin=False):
-  #  f=open(FDIR_OUT+file,'wb')
-  f=open(FDIR_OUT+file,'w')
+  if bin:
+    f=open(FDIR_OUT+file,'wb')
+  else:
+    f=open(FDIR_OUT+file,'w')
   f.write(txt)
   f.close()
   return(0)
@@ -322,7 +326,7 @@ def get_api(hostname,sub_url,user=None,password=None,params=dict(),post=False,is
     if "headers" in resp:
       if "Content-Lenght" in resp.headers:
         download_size = resp.headers["Content-Length"][0]
-    plog("[*][ DOWNLOAD SIZE: "+str(download_size)+" ]")
+        plog("[*][ DOWNLOAD SIZE: "+str(download_size)+" ]")
 
     # HERE 20231107
     resp=download_file(url,params,basicauth)
@@ -337,14 +341,18 @@ def get_api(hostname,sub_url,user=None,password=None,params=dict(),post=False,is
   try:
     #if resp and len(resp.text) < MAX_JSON_PARSE*1024:
     data=resp
-    if resp and len(resp) < MAX_JSON_PARSE*1024:
-      #resp=resp.decode("utf-8")
-      data = json.loads(resp) # Check the JSON Response Content documentation below
-      plog(f"[D] str(type(resp)): (str(type(resp))")
-      #data = resp.json() # Check the JSON Response Content documentation below
+    if resp:
+      if len(resp) < MAX_JSON_PARSE*1024:
+        #resp=resp.decode("utf-8")
+        #data = resp.json() # Check the JSON Response Content documentation below
+        plog(f"[D] str(type(resp)): {str(type(resp))}")
+        if type(resp) == bytes:
+          resp=resp.encode("utf-8")
+        data = json.loads(resp) # Check the JSON Response Content documentation below
   except Exception as e:
     #if DEBUG: print(resp.text)
-    exc_handl(e,"[!] Cannot parse the json returning the resp.text",warning=False)
+    plog(f"[!] Cannot parse the json returning the resp")
+    pass # 20231108
     #if hasattr(resp,'text'):
     #  return(resp.text)
     #else:
@@ -607,7 +615,10 @@ def get_metadata_file(TITLE,config,urls,src_fpaths,src_fnames):
     # 20231020
     res=get_api(src_server,urls[x],user=config['source']['username'],password=config['source']['password'],is_stream=False)
     if res:
-      #fwrite(tfname,res) # 20231108
+      if type(res) == bytes:
+        fwrite(tfname,res,bin=True) # 20231108 # handle binary files
+      else:
+        fwrite(tfname,res,bin=False) # 20231108
       print("[v] Download: "+urls[x]+" ... [ O.K. ]")
     else:
       print("[!] failed to download: "+urls[x]+" ... [ X ]")
@@ -1318,5 +1329,4 @@ def main():
     # RETURN CONTROL TO SHELL
     osexit(P_EXIT_FAILURE) # 20231016
 
-  
 main()
