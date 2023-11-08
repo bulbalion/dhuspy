@@ -3,10 +3,10 @@
 
 PROGRAM_HEADER="""
 
-VERSION: 0.0.1e
+VERSION: 0.0.1f
 
 Last Update: 20231108
-Last Change: download core rewrite dev backup
+Last Change: batch debug test result edits
 
 Changes:
 20230801 Initial version
@@ -26,6 +26,7 @@ Changes:
 20231102 batch test result edits
 20231107 batch debug test result edits
 20231108 download core rewrite dev backup
+20231108 test res: s2 to stac create item   
 
 Description:
 
@@ -33,7 +34,7 @@ DHR1 TO RESTO REWRITTEN: register-stac.sh from DHusTools
 
 Prereqs:
 
-# pip install stactools stactools-sentinel2 stactools-sentinel3 stactools-sentinel5p
+# pip install stactools-sentinel2 stactools-sentinel3 stactools-sentinel5p
 
 """
 
@@ -277,7 +278,7 @@ import requests
 from requests.auth import HTTPBasicAuth
 
 def download_file(url,params,basicauth):
-    resp=""
+    resp=None
     #try:
     with requests.get(url,params=params,auth=basicauth,stream=True) as r:
       r.raise_for_status()
@@ -286,7 +287,16 @@ def download_file(url,params,basicauth):
         # If you have chunk encoded response uncomment if
         # and set chunk_size parameter to None.
         if chunk: 
-          resp+=chunk.decode("utf-8") # f.write(chunk)
+          try:
+            if not resp:
+              resp=chunk.decode("utf-8") # f.write(chunk) txt
+            else:
+              resp+=chunk.decode("utf-8") # f.write(chunk) txt
+          except:
+            if not resp:
+              resp=chunk # f.write(chunk) bin
+            else:
+              resp+=chunk # f.write(chunk) bin
     #except Exception as e:
     #  plog("[*][ NO MORE DATA ON STREAM ]")
     return(resp)
@@ -326,10 +336,11 @@ def get_api(hostname,sub_url,user=None,password=None,params=dict(),post=False,is
   # PARSE THE JSON 
   try:
     #if resp and len(resp.text) < MAX_JSON_PARSE*1024:
-    #resp=resp.decode("utf-8")
     data=resp
     if resp and len(resp) < MAX_JSON_PARSE*1024:
+      #resp=resp.decode("utf-8")
       data = json.loads(resp) # Check the JSON Response Content documentation below
+      plog(f"[D] str(type(resp)): (str(type(resp))")
       #data = resp.json() # Check the JSON Response Content documentation below
   except Exception as e:
     #if DEBUG: print(resp.text)
@@ -428,7 +439,7 @@ def update_source_metadata_nodexml(fname):
 #CID,PLATFORM,titles=update_source_metadata_nodexml("node.xml")
 #plog("CID: "+CID + " PLATFORM: " + PLATFORM)
 
-def platform2fname_manifest(P_ID,PLATFORM,TITLE):
+def platform2fname_manifest(P_ID,TITLE,PLATFORM):
   # ADD 20231101
   FNAME_MANIFEST="manifest.safe"
   # MANIFEST BY PLATFORM
@@ -442,7 +453,7 @@ def platform2fname_manifest(P_ID,PLATFORM,TITLE):
   return(FNAME_MANIFEST)
 
 def platform2manifest_url(P_ID,TITLE,PLATFORM):
-  FNAME_MANIFEST=platform2fname_manifest(P_ID,PLATFORM,TITLE)
+  FNAME_MANIFEST=platform2fname_manifest(P_ID,TITLE,PLATFORM)
   sub_url = "/odata/v1/Products('"+P_ID+"')/Nodes('"+TITLE+"')"+"/"+"Nodes('"+FNAME_MANIFEST+"')/$value"
   if PLATFORM == "S1" or PLATFORM == "S2" or PLATFORM == "S3":
     sub_url = "/odata/v1/Products('"+P_ID+"')/Nodes('"+TITLE+"')"+"/"+"Nodes('"+FNAME_MANIFEST+"')/$value"
@@ -536,7 +547,7 @@ def get_product_metadata(config,P_ID):
 # READS AND PARSES manifest.safe, extracts metadata filenames and paths
 # print(ID)
 def get_source_metadata_all(ID,TITLE,PLATFORM):
-  FNAME_MANIFEST=platform2fname_manifest(ID,PLATFORM,TITLE)
+  FNAME_MANIFEST=platform2fname_manifest(ID,TITLE,PLATFORM)
   # UNSAFE # 20231030
   os.makedirs(FDIR_OUT+TITLE,exist_ok=True) 
   fname_manifest=FNAME_MANIFEST
@@ -596,7 +607,7 @@ def get_metadata_file(TITLE,config,urls,src_fpaths,src_fnames):
     # 20231020
     res=get_api(src_server,urls[x],user=config['source']['username'],password=config['source']['password'],is_stream=False)
     if res:
-      fwrite(tfname,res)
+      #fwrite(tfname,res) # 20231108
       print("[v] Download: "+urls[x]+" ... [ O.K. ]")
     else:
       print("[!] failed to download: "+urls[x]+" ... [ X ]")
@@ -1181,8 +1192,8 @@ def main():
     #
     # Run the stac tools [ TBD REVIEW TEST ONLY FOR S2A 20231018 ]
     #
-    #TITLE=titles[0]
-    TITLE=SRC_PROD_NAME+".SAFE"
+    TITLE=titles[0]
+    #TITLE=SRC_PROD_NAME+".SAFE" # 20231108
     #SRC_DIR="./tmp"
     plog("STAC_BIN: "+STAC_BIN)
     plog("PLATFORM: "+PLATFORM)
