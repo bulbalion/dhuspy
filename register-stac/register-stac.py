@@ -3,10 +3,10 @@
 
 PROGRAM_HEADER="""
 
-VERSION: 0.0.1g
+VERSION: 0.0.1h
 
-Last Update: 20231108
-Last Change: binary stream handler
+Last Update: 20231109
+Last Change: spyder advices
 
 Changes:
 20230801 Initial version
@@ -24,8 +24,9 @@ Changes:
 20231020 test result edits
 20231101 batch test result edits
 20231102 batch test result edits
-20231107 batch test result edits
-20231108 binary stream hanlder, tests src sync
+20231107 batch debug test result edits
+20231108 batch debug test result edits
+20231109 batch debug test result edits
 
 Description:
 
@@ -40,7 +41,12 @@ TBD:
 [*] post request reimplementation
 
 """
+# CHANGE HERE DOWNLOAD DATA DIRECTORY
+FDIR_OUT="/home/debian/test/tmp/"
+FNAME_LOCK="register-stac.lock"
 
+# DESTINATION COLLECION TEST PREFIX
+DST_COL_TEST_PREFIX="mp-"
 
 # PLOG MSG TYPES
 MTRACE=3
@@ -59,10 +65,6 @@ DOWNLOAD_SWAP_FNAME="tmp_register_stac.swap"
 P_EXIT_SUCESS=0
 P_EXIT_FAILURE=1
 
-# CHANGE HERE DOWNLOAD DATA DIRECTORY
-FDIR_OUT="/home/debian/dev/dhuspy/register-stac/tmp/"
-FNAME_LOCK="register-stac.lock"
-
 # DOWNLOAD TIMEOUT
 DOWNLOAD_TIMEOUT=4096
 
@@ -74,7 +76,7 @@ import getopt
 import inspect
 import json
 import os
-from os import listdir, sep, path
+from os import listdir, sep #, path
 from pathlib import Path
 import re
 import requests
@@ -131,7 +133,7 @@ def plog(message,message_priority=1):
 # REQ 20230801003 endpoint specified in configuration - read
 # READ CONFIG
 def read_ini():
-  config = configparser.ConfigParser()
+  config=configparser.ConfigParser()
   config.sections()
   config.read('dhus.ini')
   if "source" not in config and "target" not in config:
@@ -264,29 +266,27 @@ def get_api_large_file(url,basicauth,is_stream):
   return(local_filename)
 
 
-def get_download_link_size(url):
-  resp = request.head(url)
-  print(str(resp.headers))
-  #if download_size > 16*1024*1024:
-  plog("Too large file, exiting")
-  osexit(0)
+#def get_download_link_size(url):
+#  resp = request.head(url)
+#  print(str(resp.headers))
+#  #if download_size > 16*1024*1024:
+#  plog("Too large file, exiting")
+#  osexit(0)
 
-  site = urllib.urlopen(url)
-  meta = site.info()
-  #download_size = meta.getheaders("Content-Length")[0]
-  plog(f"Content-Length: {download_size}")
-  if download_size > 16*1024*1024:
-    plog("Too large file, exiting")
-    osexit(0)
+#  #site = urllib.urlopen(url)
+#  #meta = site.info()
+#  #download_size = meta.getheaders("Content-Length")[0]
+#  #plog(f"Content-Length: {download_size}")
+#  #if download_size > 16*1024*1024:
+#  #  plog("Too large file, exiting")
+#  #  osexit(0)
 
-import requests
-from requests.auth import HTTPBasicAuth
 
 def download_file(url,params,basicauth):
     resp=None
     #try:
     with requests.get(url,params=params,auth=basicauth,stream=True) as r:
-      r.raise_for_status()
+      #r.raise_for_status()
       #with open(fname, 'wb') as f:
       for chunk in r.iter_content(chunk_size=8192): 
         # If you have chunk encoded response uncomment if
@@ -317,17 +317,19 @@ def get_api(hostname,sub_url,user=None,password=None,params=dict(),post=False,is
   plog("[w] URL: "+url)
 
   try:
+    # 20231108
     # GET WEB PAGE HEADER 
-    from requests.auth import HTTPBasicAuth
-    basicauth=HTTPBasicAuth(user, password)
-    resp = requests.head(url,auth=basicauth,params=params)
-
+    basicauth=None
+    if user and password:
+      from requests.auth import HTTPBasicAuth
+      basicauth=HTTPBasicAuth(user, password)
+    #resp = requests.head(url,auth=basicauth,params=params)
     # DOWNLOAD SIZE PREDICTION
-    download_size=0
-    if "headers" in resp:
-      if "Content-Lenght" in resp.headers:
-        download_size = resp.headers["Content-Length"][0]
-        plog("[*][ DOWNLOAD SIZE: "+str(download_size)+" ]")
+    #download_size=0
+    #if "headers" in resp:
+    #  if "Content-Lenght" in resp.headers:
+    #    download_size = resp.headers["Content-Length"][0]
+    #    plog("[*][ DOWNLOAD SIZE: "+str(download_size)+" ]")
 
     # HERE 20231107
     resp=download_file(url,params,basicauth)
@@ -348,12 +350,12 @@ def get_api(hostname,sub_url,user=None,password=None,params=dict(),post=False,is
         #data = resp.json() # Check the JSON Response Content documentation below
         plog(f"[D] str(type(resp)): {str(type(resp))}")
         if type(resp) == bytes:
-          resp=resp.encode("utf-8")
+          resp=resp.decode("utf-8")
         data = json.loads(resp) # Check the JSON Response Content documentation below
   except Exception as e:
     #if DEBUG: print(resp.text)
-    plog(f"[!] Cannot parse the json returning the resp")
-    pass # 20231108
+    plog(f"[!] Cannot parse the json returning the resp {str(e)}")
+    #return(data) # 20231109
     #if hasattr(resp,'text'):
     #  return(resp.text)
     #else:
@@ -369,7 +371,8 @@ def get_api(hostname,sub_url,user=None,password=None,params=dict(),post=False,is
 #
 def get_collection_metadata():
 
-  server = config["target"]["url"]
+  config=read_ini() 
+  server=config["target"]["url"]
   sub_url = "/collections"
   res=get_api(server,sub_url)
 
@@ -433,8 +436,8 @@ def update_source_metadata_nodexml(fname):
     break
   if len(titles)>0:
     plog("TITLE: "+titles[0])
-  if id:
-    PREFIX=id
+  #if id:
+  #  PREFIX=id
   #ID=titles[0]
   #PLATFORM=ID[0:2]
   #plog("PLATFORM: "+PLATFORM)
@@ -454,7 +457,7 @@ def platform2fname_manifest(P_ID,TITLE,PLATFORM):
   # MANIFEST BY PLATFORM
   if PLATFORM == "S1" or PLATFORM == "S2":
     FNAME_MANIFEST="manifest.safe"
-  elif PLATFORM == "S3" or PLATFORM == "S3":
+  elif PLATFORM == "S3" or PLATFORM == "S3p":
     FNAME_MANIFEST="xfdumanifest.xml"
   else:
     #os.rmdir(TITLE)
@@ -542,8 +545,8 @@ def get_product_metadata(config,P_ID):
   res=get_api(server,sub_url,user=config['source']['username'],password=config['source']['password']) # CONF
   # ADV DEBUG
   # plog(res)
-  #if res:
-  #  fwrite("manifest.safe",res)
+  if res:
+    fwrite("node.xml",res)
   return(res)
 
 # TEST
@@ -559,12 +562,12 @@ def get_source_metadata_all(ID,TITLE,PLATFORM):
   FNAME_MANIFEST=platform2fname_manifest(ID,TITLE,PLATFORM)
   # UNSAFE # 20231030
   os.makedirs(FDIR_OUT+TITLE,exist_ok=True) 
-  fname_manifest=FNAME_MANIFEST
+  #fname_manifest=FNAME_MANIFEST
   plog("MANIFEST READ: "+TITLE+os.sep+FNAME_MANIFEST)
   try:
     mnfst=fread(TITLE+os.sep+FNAME_MANIFEST)
   except Exception as e:
-    plog("[!][ RS ERR ][ MANIFEST SAFE NOT READY ]")
+    plog(f"[!][ RS ERR ][ MANIFEST SAFE NOT READY {str(e)}]")
     osexit(P_EXIT_FAILURE)
   #fwrite(ID+os.sep+FNAME_MANIFEST,mnfst)
   src_mnfst = bs.BeautifulSoup(mnfst,features="xml")
@@ -582,7 +585,7 @@ def get_source_metadata_all(ID,TITLE,PLATFORM):
           HREF=val.get('href')
           file_locs.append(HREF)
           if HREF[:2]=="./":
-            tmp_href=HREF[2:]
+            HREF=HREF[2:] # 20231109
     #FNAME=FDIR_OUT+TITLE+os.sep+(os.sep.join(tmp_href.split(os.sep)))
     #plog("href: "+str(HREF))
     #plog("fname: "+str(FNAME))
@@ -658,7 +661,7 @@ def metadata_json_patch(config,server,src_fnames,src_paths,PROD_ID,NODE_NAME):
 # REQ 20230801004 Determines which collection the product belongs to
 # MAPS SOURCE PRODUCT NAMES TO TARGET NAMES COLLECTIONS
 
-def translate_prod2col(titles,PLATFORM,test_col_prefix="mp-"):
+def translate_prod2col(titles,PLATFORM,test_col_prefix=DST_COL_TEST_PREFIX):
   # TEST ONLY
   #test_col_prefix="mp-"
 
@@ -781,7 +784,7 @@ def get_json_ls(idir=".",PLATFORM="S2A"):
 
 
 # REQ 20230801006 Modifies asset URLs to match actual URLs in DHuS.
-def update_json_hrefs(fname,fname_out="resto-test_upload.json",AID=None):
+def update_json_hrefs(HOST,P_ID,fname,fname_out="resto-test_upload.json"):
   debug_test_href=""
   fcjson=fread(fname)
   djson=json.loads(fcjson)
@@ -790,7 +793,7 @@ def update_json_hrefs(fname,fname_out="resto-test_upload.json",AID=None):
   djson=orig_json
   upload_json=orig_json
   #json_id=''.join(AID.split('.')[:-1])
-  json_id="dhr1"+AID # TBD REVIEW HERE
+  json_id="dhr1"+P_ID # TBD REVIEW HERE
   upload_json["id"]=json_id
   for key in djson.keys():
     if key == "assets": # ASSETS DRILL DOWN
@@ -836,26 +839,27 @@ def update_json_hrefs(fname,fname_out="resto-test_upload.json",AID=None):
 # curl -n -o output.json -X POST "${STACHOST}/collections/${COLLECTION[${PLATFORM}]}/items"
 # -H 'Content-Type: application/json' -H     'Accept: application/json'
 # --upload-file "new_${file}"
-def view_col_items(DST_COLLECCTION):
-  #basicauth=None
-  #resto_url="resto-test.c-scale.zcu.cz"
-  server_protocol="https://"
-  server=config["target"]["url"] # REVIEW TBD HERE
-  #sub_url="/collections"+DST_COLLECTION+"["+PLATFORM+"]"+"/"+"items"
-  sub_url="/collections" # /"+DST_COLLECTION+"["+PLATFORM+"]"
-  sub_url="/collections/"+DST_COLLECTION+"/"+"items" # ?
-  #sub_url="/collections/"+DST_COLLECTION+"/"+"items"
-  #ruser=fread("resto_user.txt").strip()
-  #rpass=fread("resto_pass.txt").strip()
-  ruser=config["target"]["username"].strip() # REVIEW TBD HERE
-  rpass=config["target"]["password"].strip() # REVIEW TBD HERE
-  # print(ruser+" "+rpass) # DEBUG
-  basicauth=HTTPBasicAuth(ruser, rpass)
-  resp = requests.get(server_protocol+resto_url+sub_url,auth=basicauth)
-  #print(resp.text) # DEBUG
-  data=json.loads(resp.text)
-  #print(data["title"])
-  return(data)
+# COM 20231109
+#def view_col_items(DST_COLLECCTION,DST_URL):
+#  #basicauth=None
+#  #resto_url="resto-test.c-scale.zcu.cz"
+#  server_protocol="https://"
+#  server=config["target"]["url"] # REVIEW TBD HERE
+#  #sub_url="/collections"+DST_COLLECTION+"["+PLATFORM+"]"+"/"+"items"
+#  sub_url="/collections" # /"+DST_COLLECTION+"["+PLATFORM+"]"
+#  sub_url="/collections/"+DST_COLLECTION+"/"+"items" # ?
+#  #sub_url="/collections/"+DST_COLLECTION+"/"+"items"
+#  #ruser=fread("resto_user.txt").strip()
+#  #rpass=fread("resto_pass.txt").strip()
+#  ruser=config["target"]["username"].strip() # REVIEW TBD HERE
+#  rpass=config["target"]["password"].strip() # REVIEW TBD HERE
+#  # print(ruser+" "+rpass) # DEBUG
+#  basicauth=HTTPBasicAuth(ruser, rpass)
+#  resp = requests.get(server_protocol+DST_URL+sub_url,auth=basicauth)
+#  #print(resp.text) # DEBUG
+#  data=json.loads(resp.text)
+#  #print(data["title"])
+#  return(data)
 
 
 # TBD: TRANSLATE COLLECTIO NAME FROM ID
@@ -950,7 +954,7 @@ def test_target_url(config):
   return(res)
 
 #  GET PRODUCT NAME BY ID
-def get_product_name_by_id(pro_meta):
+def get_product_name_by_id(pro_meta,HOST):
   SID=None
   try:
     pro_meta_arr=bs.BeautifulSoup(pro_meta,features="xml")
@@ -968,7 +972,7 @@ def rmlock():
   try:
     os.remove(FDIR_OUT+FNAME_LOCK)
   except Exception as e:
-    plog("[ ERR RS-0010 ][!][ CANNOT REMOVE THE LOCK FILE ]")
+    plog(f"[ ERR RS-0010 ][!][ CANNOT REMOVE THE LOCK FILE ERR: {str(e)}]")
 
 
 # source info api print
@@ -1002,16 +1006,16 @@ def main():
   #
   try: # OS DEPENDEND
     pid = os.getpid()
-  except Exceptions as e:
-    plog("[*][ CURRENT PROCESS OPERATING SYSTEM ID: "+str(pid))
+  except Exception as e:
+    plog(f"[*][ CURRENT PROCESS OPERATING SYSTEM ID: {str(pid)} ERR: {str(e)}")
   
   #
   # WRITE DOWN THE LOCK
   #
   try: # OS DEPENDEND
     fwrite(FNAME_LOCK,str(pid)) # WRITE DOWN THE LOCK FILE
-  except Exceptions as e:
-    plog("[*][ CANNOT START THE PROGRAM.")
+  except Exception as e:
+    plog(f"[*][ CANNOT START THE PROGRAM. {str(e)}")
 
   # MAIN PROGRAM TRY
   try:
@@ -1029,23 +1033,27 @@ def main():
     #res=test_target_url(config)
 
     home_folder = os.getenv('HOME')
+    plog(f"[*][ RETRIEVED HOME FOLDER PATH {home_folder}]")
     # common pip local install
     # EGI notebooks
     # STAC_BIN='/opt/conda/bin/stac' 
     # STAC_BIN=home_folder+'/.local/bin/stac' 
     STAC_BIN='/usr/local/bin/stac' 
     
-    DST_COL_TEST_PREFIX="mp-"
-
     SRC_URL=config["source"]["url"] 
     DST_URL=config["target"]["url"]
+    
+    sub_url = "/collections"
+    
     #STACHOST=config["target"]["url"]
     #P_ID=ID
-    TMP="/tmp"
-    SUCCPREFIX="/var/tmp/register-stac-success-"
-    ERRPREFIX="/var/tmp/register-stac-error-"
-    SALT="dhr1"
-    sub_url = "/collections"
+    
+    # 20231109
+    #TMP="/tmp"
+    #SUCCPREFIX="/var/tmp/register-stac-success-"
+    #ERRPREFIX="/var/tmp/register-stac-error-"
+    #SALT="dhr1"
+    
     
     #plog("[*] SRC_URL: "+SRC_URL)
     #plog("[*] DST URL: "+DST_URL)
@@ -1059,7 +1067,7 @@ def main():
 
     # ADV DEBUG 
     # plog(pro_meta)
-    SRC_PROD_NAME=get_product_name_by_id(pro_meta)
+    SRC_PROD_NAME=get_product_name_by_id(pro_meta,SRC_URL)
     PLATFORM=SRC_PROD_NAME[:2] 
     TITLE=SRC_PROD_NAME+".SAFE"
     
@@ -1160,7 +1168,7 @@ def main():
       #
       # GET DESTIONATION COLLECTION ID FROM PRODUCT ID
       #
-      DST_COLLECTION=translate_prod2col(titles,PLATFORM)
+      DST_COLLECTION=translate_prod2col(titles,PLATFORM,DST_COL_TEST_PREFIX)
       plog("DST_COLLECTION: " + DST_COLLECTION)
  
       src_fnames,src_paths=get_source_metadata_all(SRC_PROD_NAME,TITLE,PLATFORM)
@@ -1186,10 +1194,10 @@ def main():
     if titles:
       if len(titles)>0:
         SRC_PROD_NAME=titles[0]
-    #if not titles:
-    #  DST_COLLECTION=translate_prod2col(SRC_PROD_NAME,PLATFORM)
-    #else:
-    DST_COLLECTION=translate_prod2col(SRC_PROD_NAME,DST_COL_TEST_PREFIX)
+    plog(f"[*][ {SRC_PROD_NAME} ]")
+    DST_COLLECTION=translate_prod2col([SRC_PROD_NAME],PLATFORM,DST_COL_TEST_PREFIX) # 20231109
+
+    #
     # DEBUG ID AND NAMES
     #
     plog("SOURCE PRODUCT ID: "+SRC_PROD_ID)
@@ -1205,7 +1213,6 @@ def main():
     # Run the stac tools [ TBD REVIEW TEST ONLY FOR S2A 20231018 ]
     #
     TITLE=titles[0]
-    #TITLE=SRC_PROD_NAME+".SAFE" # 20231108
     #SRC_DIR="./tmp"
     plog("STAC_BIN: "+STAC_BIN)
     plog("PLATFORM: "+PLATFORM)
@@ -1223,6 +1230,10 @@ def main():
     SRC_DIR="./" # this supposes the os.chdir
     plog("SRC_DIR: "+SRC_DIR)
     os.chdir(FDIR_OUT)
+    # 20231108 PATCH SAFE
+    if TITLE.split('.')[1]!="SAFE":
+      TITLE=TITLE.split('.')[0]+".SAFE"
+      plog(f"[*][ New Title {TITLE}")
     run_stac_tools(STAC_BIN,PLATFORM,TITLE,SRC_DIR)
     
     #  
@@ -1236,7 +1247,7 @@ def main():
     # 
     # Patch the JSON
     # 
-    update_json_hrefs(fname,fname_out,SRC_PROD_ID)
+    update_json_hrefs(DST_URL,SRC_PROD_ID,fname,fname_out,)
 
     #
     # VERIFY UPLOAD INFO
@@ -1244,7 +1255,7 @@ def main():
 
     plog("[i] UPLOAD READY") 
     plog("[+] RESULT: ")
-    dbg_fname_upload=fname_out
+    #dbg_fname_upload=fname_out
     dbg_src_url=config['source']['url']
     dbg_src_user=config['source']['username']
     dbg_src_prod_id=SRC_PROD_ID
@@ -1298,7 +1309,7 @@ def main():
     if "status" in upload_res:
       #resto_url="resto-test.c-scale.zcu.cz"
       resto_url = "https://"+config["target"]["url"]
-      sub_url="/collections/"+DST_COLLECTIONS+"/"+"items/"+upload_res["features"][0]["featureId"]
+      sub_url="/collections/"+DST_COLLECTION+"/"+"items/"+upload_res["features"][0]["featureId"]
       headers = {"Content-Type": "application/json; charset=utf-8"}
       ruser=config['target']['username'].strip()
       rpass=config['target']['password'].strip()
