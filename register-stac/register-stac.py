@@ -1,6 +1,24 @@
 #!/usr/bin/env python3
 # coding: utf-8
 
+# IMPORTS
+import bs4 as bs
+import configparser
+import datetime
+import getopt
+import inspect
+import json
+import os
+from os import listdir, sep  # , path
+from pathlib import Path
+import re
+import requests
+from requests.auth import HTTPBasicAuth
+import subprocess
+import sys
+import traceback
+
+
 PROGRAM_HEADER = """
 
 VERSION: 0.0.1g
@@ -33,6 +51,8 @@ Description:
 DHR1 TO RESTO REWRITTEN: register-stac.sh from DHusTools
 
 Prereqs:
+
+TBD: $ black register-stac.py && flake8 --max-line-length 100
 
 # pip install stactools stactools-sentinel2 stactools-sentinel3 stactools-sentinel5p
 
@@ -67,23 +87,6 @@ P_EXIT_FAILURE = 1
 
 # DOWNLOAD TIMEOUT
 DOWNLOAD_TIMEOUT = 4096
-
-# IMPORTS
-import bs4 as bs
-import configparser
-import datetime
-import getopt
-import inspect
-import json
-import os
-from os import listdir, sep  # , path
-from pathlib import Path
-import re
-import requests
-from requests.auth import HTTPBasicAuth
-import subprocess
-import sys
-import traceback
 
 
 # REQ 20230801002 Obtains metadata for the given product from DHuS storage | 003
@@ -190,7 +193,7 @@ def exc_handl(e, msg, warning=True):
         traceback.print_exc(file=sys.stdout)
     if DEBUG > 1:
         plog(msg, 2)  # CHANGE HERE
-    if warning == True:
+    if warning:
         if e is not None:
             plog("[!] Exception message: " + str(e))
     return P_EXIT_FAILURE
@@ -275,7 +278,7 @@ def check_source_id(src_id):
     if not CTRL_001 == 1 and not CTRL_002 == 1:
         # plog("[ ERR RS-0040 ][!] BOTH CTRL_002 DOES NOT COMPLY TO THE COMMON FORMAT")
         plog(
-            "[ERR RS-0040 ][!][ BOTH CTRL_001 OR CTRL_002 Controls did not pass. ID seems to be malformed. ]"
+            "[ERR RS-0040 ][!][ BOTH CTRL_001 OR CTRL_002 FAILED. ID seems to be malformed. ]"
         )
         osexit(P_EXIT_FAILURE)
 
@@ -335,7 +338,8 @@ def download_file(url, params, basicauth):
                         resp = chunk.decode("utf-8")  # f.write(chunk) txt
                     else:
                         resp += chunk.decode("utf-8")  # f.write(chunk) txt
-                except:
+                except Exception as e:
+                    plog(f"[*][ Download chunk .... {str(e)}]")
                     if not resp:
                         resp = chunk  # f.write(chunk) bin
                     else:
@@ -368,8 +372,6 @@ def get_api(
         # GET WEB PAGE HEADER
         basicauth = None
         if user and password:
-            from requests.auth import HTTPBasicAuth
-
             basicauth = HTTPBasicAuth(user, password)
         # resp = requests.head(url,auth=basicauth,params=params)
         # DOWNLOAD SIZE PREDICTION
@@ -396,8 +398,8 @@ def get_api(
             if len(resp) < MAX_JSON_PARSE * 1024:
                 # resp=resp.decode("utf-8")
                 # data = resp.json() # Check the JSON Response Content documentation below
-                plog(f"[D] str(type(resp)): {str(type(resp))}")
-                if type(resp) == bytes:
+                # plog(f"[D] str(type(resp)): {str(type(resp))}")
+                if isinstance(resp, bytes):
                     resp = resp.decode("utf-8")
                 data = json.loads(
                     resp
@@ -587,14 +589,14 @@ def get_source_metadata_manifest_safe(config, P_ID, TITLE, PLATFORM):
         try:
             os.mkdir(FDIR_OUT + TITLE)
             plog(f"[*][001] PRODUCT DIR {TITLE} CREATED.")
-        except:
-            plog("[!][001] PRODUCT DIR ALREADY EXISTS " + TITLE)
+        except Exception as e:
+            plog(f"[!][001] PRODUCT DIR ALREADY EXISTS {str(e)} " + TITLE)
         try:
             newdir = Path(FDIR_OUT + os.sep + TITLE)
             newdir.mkdir(parents=True, exist_ok=True)  # 20231019
             plog(f"[*][S002] PRODUCT DIR {TITLE} CREATED.")
-        except:
-            plog("[!][S002] PRODUCT DIR ALREADY EXISTS " + TITLE)
+        except Exception as e:
+            plog(f"[!][S002] PRODUCT DIR ALREADY EXISTS {str(e)} " + TITLE)
         try:
             # fwrite(TITLE+os.sep+FNAME_MANIFEST,res,bin=True)
             fwrite(TITLE + os.sep + FNAME_MANIFEST, res)
@@ -669,8 +671,6 @@ def get_source_metadata_all(ID, TITLE, PLATFORM):
     file_locs = []
     for val in src_mnfst.find_all("fileLocation"):  # NOT LIMITED
         # 20231004 MP added tiff filter
-        # if ('.tiff' not in val.get('href') and '.jp2' not in val.get('href') and '.gml' not in val.get('href')): # GET ONLY METADATA NODES NAMES
-        # if ('.tiff' not in val.get('href') and '.jp2' not in val.get('href') and '.gml' not in val.get('href')): # GET ONLY METADATA NODES NAMES
         # GET ONLY METADATA NODES NAMES
         if ".tiff" not in val.get("href"):
             if ".jp2" not in val.get("href"):
@@ -720,7 +720,7 @@ def get_metadata_file(TITLE, config, urls, src_fpaths, src_fnames):
             is_stream=False,
         )
         if res:
-            if type(res) == bytes:
+            if isinstance(res, bytes):
                 fwrite(tfname, res, bin=True)  # 20231108 # handle binary files
             else:
                 fwrite(tfname, res, bin=False)  # 20231108
@@ -928,13 +928,12 @@ def update_json_hrefs(HOST, P_ID, fname, fname_out="resto-test_upload.json"):
                         url = (
                             HOST + "odata/v1/Products('" + P_ID + "')/" + new_href
                         )  # 20231019
-                        ##djson[key][x]["href"].value=url
-                        # djson[key][x]["href"]=url
                         upload_json[key][x]["href"] = url
                         if debug_test_href == "":
                             # print(upload_json[key][x]["href"])
                             debug_test_href = upload_json[key][x]["href"]
-            except:
+            except Exception as e:
+                plog(f"[*][ djson.keys() iteration excpetion pass {str(e)}]")
                 pass
     plog("res: " + str(upload_json)[:100] + " ...")
     plog("res href: " + debug_test_href)
@@ -1240,20 +1239,6 @@ def main():
 
         # retrieve all source metadata
 
-        ## Get manifest
-        #
-        # if [ "$PLATFORM" == "S1" -o "$PLATFORM" == "S2" ]; then
-        #        MANIFEST="${TITLE}/manifest.safe"
-        #        curl ${OS_ACCESS_TOKEN:+-H "Authorization: Bearer $OS_ACCESS_TOKEN"} -n -o "${MANIFEST}" "${PREFIX}/Nodes(%27manifest.safe%27)/%24value"
-        # elif [ "$PLATFORM" == "S3" -o "$PLATFORM" == "S3p" ]; then
-        #        MANIFEST="${TITLE}/xfdumanifest.xml"
-        #        curl ${OS_ACCESS_TOKEN:+-H "Authorization: Bearer $OS_ACCESS_TOKEN"} -n -o "${MANIFEST}" "${PREFIX}/Nodes(%27xfdumanifest.xml%27)/%24value"
-        # else
-        #        MANIFEST="${TITLE}"
-        #        rmdir "${TITLE}"
-        #        curl ${OS_ACCESS_TOKEN:+-H "Authorization: Bearer $OS_ACCESS_TOKEN"} -n -o "${MANIFEST}" "${PREFIX}/%24value"
-        # fi
-
         # metadata=get_source_metadata_all(SRC_PROD_NAME,TITLE,PLATFORM)
 
         # plog(metadata)
@@ -1312,7 +1297,6 @@ def main():
             #
             # Patch the metadata
             #
-            # #src_names,urls = metadata_json_patch(config,server,src_fnames,src_paths,PROD_ID,NODE_NAME,prev_prod="'MTD_MSIL2A.xml'"):
             urls2, src_fpaths2, src_fnames2 = metadata_json_patch(
                 config, SRC_URL, src_fnames, src_paths, SRC_PROD_ID, TITLE
             )
