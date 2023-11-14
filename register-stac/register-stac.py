@@ -66,6 +66,9 @@ TBD:
 FDIR_OUT = "/tmp/dhuspy/"
 FNAME_LOCK = "register-stac.lock"
 
+# RUNTIME DIR
+RUNTIME_DIR = os.getcwd()
+
 # DESTINATION COLLECION TEST PREFIX
 DST_COL_TEST_PREFIX = "mp-"
 
@@ -92,8 +95,14 @@ DOWNLOAD_TIMEOUT = 4096
 
 # REQ 20230801002 Obtains metadata for the given product from DHuS storage | 003
 # read node.xml
-def fread(file):
-    f = open(FDIR_OUT + file, "r")
+def fread(file, FDIR=None):
+    if FDIR is None:
+        FDIR = FDIR_OUT
+    else:
+        FDIR = FDIR_OUT + os.sep + FDIR
+    if FDIR[-1] != os.sep:
+        FDIR = FDIR + os.sep
+    f = open(FDIR + file, "r")
     txt = f.read()
     f.close()
     return txt
@@ -101,19 +110,33 @@ def fread(file):
 
 # REQ 20230801002 Obtains metadata for the given product from DHuS storage | 002
 # save node.xml
-def fwrite(file, txt, bin=False):
-    if bin:
-        f = open(FDIR_OUT + file, "wb")
+def fwrite(pfile, txt, FDIR=None):
+    if FDIR is None:
+        FDIR = FDIR_OUT
     else:
-        try:
-            os.mkdir(FDIR_OUT)
-            plog("Created Directory FDIR_OUT")
-        except Exception as e:
-            plog(f"[D] fwrite mkdir exception: {str(e)}")
-        f = open(FDIR_OUT + file, "w")
-    f.write(txt)
-    f.close()
-    plog(f"[F] writen : {FDIR_OUT}{file} {str(bin)}")
+        FDIR = FDIR_OUT + os.sep + FDIR
+    if FDIR[-1] != os.sep:
+        FDIR = FDIR + os.sep
+    try:
+        newdir = Path(FDIR)
+        newdir.mkdir(parents=True, exist_ok=True)  # 20231019
+        plog(f"[*] event: fwrite created directory {FDIR}")
+    except Exception as e:
+        plog(f"[!] warning: fwrite create directory {str(e)} {FDIR}")
+    try:
+        os.chdir(FDIR)
+    except Exception as e:
+        plog(f"[!] TARGET DIR {FDIR} DOES NOT EXISTS {str(e)}")
+    try:
+        if isinstance(txt, bytes):
+            f = open(pfile, "wb")
+        else:
+            f = open(pfile, "w")
+        f.write(txt)
+        f.close()
+    except Exception as e:
+        plog(f"[*] error: fwrite cannot write file {pfile} in {FDIR} error: {str(e)}")
+    plog(f"[F] written : FDIR: {FDIR} FILE: {pfile} BIN: {str(isinstance(txt, bytes))}")
     return 0
 
 
@@ -159,6 +182,7 @@ def plog(message, message_priority=1):
 # REQ 20230801003 endpoint specified in configuration - read
 # READ CONFIG
 def read_ini():
+    os.chdir(RUNTIME_DIR)
     config = configparser.ConfigParser()
     config.sections()
     config.read("dhus.ini")
@@ -361,7 +385,7 @@ def download_file(url, params, basicauth):
                 cnt += 1
     # except Exception as e:
     #  plog("[*][ NO MORE DATA ON STREAM ]")
-    return resp.decode("utf8")
+    return resp  # .decode("utf-8","replace")
 
 
 #
@@ -388,7 +412,6 @@ def get_api(
         basicauth = None
         if user and password:
             basicauth = HTTPBasicAuth(user, password)
-        # resp = requests.head(url,auth=basicauth,params=params)
         # DOWNLOAD SIZE PREDICTION
         # download_size=0
         # if "headers" in resp:
@@ -397,6 +420,8 @@ def get_api(
         #    plog("[*][ DOWNLOAD SIZE: "+str(download_size)+" ]")
 
         # HERE 20231107
+        # if "text" not in resp:
+        # resp = requests.get(url,auth=basicauth,params=params)
         resp = download_file(url, params, basicauth)
 
     except Exception as e:
@@ -432,7 +457,7 @@ def get_api(
     # except Exception as e:
     #  exc_handl(e,"[!] Cannot get element from the parsed json")
     plog(f"[D] sucess at: {url}")
-    return data
+    return data  # .text
 
 
 #
@@ -493,8 +518,8 @@ def get_source_metadata(config, P_ID):
 # TITLE='xmlstarlet sel -d -T -t -v "//_:entry/_:title" node.xml'
 # PREFIX='xmlstarlet sel -d -T -t -v "//_:entry/_:id" node.xml'
 #
-def update_source_metadata_nodexml(fname):
-    xml = fread(fname)
+def update_source_metadata_nodexml(fname, TITLE):
+    xml = fread(fname)  # 20231114
     # plog(xml)
     src_xml = bs.BeautifulSoup(xml, features="xml")
     titles = []
@@ -544,30 +569,19 @@ def platform2fname_manifest(P_ID, TITLE, PLATFORM):
 
 def platform2manifest_url(P_ID, TITLE, PLATFORM, SUFFIX):
     FNAME_MANIFEST = platform2fname_manifest(P_ID, TITLE, PLATFORM)
-    sub_url = (
-        "/odata/v1/Products('"
-        + P_ID
-        + "')/Nodes('"
-        + TITLE
-        + "')"
-        + "/"
-        + "Nodes('"
-        + FNAME_MANIFEST
-        + "')/$value"
-    )
-    if PLATFORM == "S1" or PLATFORM == "S2":
-        sub_url = (
-            "/odata/v1/Products('"
-            + P_ID
-            + "')/Nodes('"
-            + TITLE
-            + "')"
-            + "/"
-            + "Nodes('"
-            + FNAME_MANIFEST
-            + "')/$value"
-        )
-    elif PLATFORM == "S3":
+    sub_url = ()
+    # sub_url = (
+    #    "/odata/v1/Products('"
+    #    + P_ID
+    #    + "')/Nodes('"
+    #    + TITLE
+    #    + "')"
+    #    + "/"
+    #    + "Nodes('"
+    #    + FNAME_MANIFEST
+    #    + "')/$value"
+    # )
+    if PLATFORM == "S1" or PLATFORM == "S2" or PLATFORM == "S3":
         sub_url = (
             "/odata/v1/Products('"
             + P_ID
@@ -581,6 +595,20 @@ def platform2manifest_url(P_ID, TITLE, PLATFORM, SUFFIX):
             + FNAME_MANIFEST
             + "')/$value"
         )
+    # elif PLATFORM == "S3":
+    #    sub_url = (
+    #        "/odata/v1/Products('"
+    #        + P_ID
+    #        + "')/Nodes('"
+    #        + TITLE
+    #        + "."
+    #        + SUFFIX
+    #        + "')"
+    #        + "/"
+    #        + "Nodes('"
+    #        + FNAME_MANIFEST
+    #        + "')/$value"
+    #    )
     else:
         # sub_url = "/odata/v1/Products('"+P_ID+"')/$value"
         # sub_url = "/odata/v1/Products('"+P_ID+"')"
@@ -616,23 +644,24 @@ def get_source_metadata_manifest_safe(config, P_ID, TITLE, PLATFORM, SUFFIX="SAF
     # ADV DEBUG plog(res.split('\n')[:10])
     if res:
         # CREATE DIR IF IT DOES NOT EXISTS
-        try:
-            os.mkdir(FDIR_OUT + TITLE)
-            plog(f"[*][001] PRODUCT DIR {TITLE} CREATED.")
-        except Exception as e:
-            plog(f"[!][001] PRODUCT DIR ALREADY EXISTS {str(e)} " + TITLE)
-        try:
-            newdir = Path(FDIR_OUT + os.sep + TITLE)
-            newdir.mkdir(parents=True, exist_ok=True)  # 20231019
-            plog(f"[*][S002] PRODUCT DIR {TITLE} CREATED.")
-        except Exception as e:
-            plog(f"[!][S002] PRODUCT DIR ALREADY EXISTS {str(e)} " + TITLE)
+        # try:
+        #    os.mkdir(FDIR_OUT + TITLE)
+        #    plog(f"[*][001] PRODUCT DIR {TITLE} CREATED.")
+        # except Exception as e:
+        #    plog(f"[!][001] PRODUCT DIR ALREADY EXISTS {str(e)} " + TITLE)
+        # try:
+        #    newdir = Path(FDIR_OUT + os.sep + TITLE)
+        #    newdir.mkdir(parents=True, exist_ok=True)  # 20231019
+        #    plog(f"[*][S002] PRODUCT DIR {TITLE} CREATED.")
+        # except Exception as e:
+        #    plog(f"[!][S002] PRODUCT DIR ALREADY EXISTS {str(e)} " + TITLE)
         try:
             # fwrite(TITLE+os.sep+FNAME_MANIFEST,res,bin=True)
-            fwrite(TITLE + os.sep + FNAME_MANIFEST, res)
-            if SUFFIX != "SAFE":
-                fwrite(TITLE + "." + SUFFIX + os.sep + FNAME_MANIFEST, res)
+            fwrite(FNAME_MANIFEST, res, FDIR=TITLE)
+            # if SUFFIX != "SAFE":
+            #    fwrite(TITLE + "." + SUFFIX + os.sep + FNAME_MANIFEST, res)
             # fwrite(TITLE+os.sep+"manifest.safe",res)
+            # fwrite(TITLE+os.sep+"xfdumanifest.xml",res)
             plog(f"[o] PLATFORM: {PLATFORM}, FNAME: {FNAME_MANIFEST} file saved.")
             plog(f"[o] TITLE: {TITLE}{os.sep}{FNAME_MANIFEST} stored.")
         except Exception as e:
@@ -642,7 +671,8 @@ def get_source_metadata_manifest_safe(config, P_ID, TITLE, PLATFORM, SUFFIX="SAF
     else:
         msg = f"[*] CANNOT SAVE MANIFEST FILE {FNAME_MANIFEST}"
         osexit(P_EXIT_FAILURE)
-    return TITLE + os.sep + FNAME_MANIFEST
+    # return TITLE + os.sep + FNAME_MANIFEST
+    return FNAME_MANIFEST
 
 
 # TEST
@@ -690,18 +720,18 @@ def get_product_metadata(config, P_ID):
 def get_source_metadata_all(ID, TITLE, PLATFORM):
     FNAME_MANIFEST = platform2fname_manifest(ID, TITLE, PLATFORM)
     # UNSAFE # 20231030
-    os.makedirs(FDIR_OUT + TITLE, exist_ok=True)
+    # os.makedirs(FDIR_OUT + TITLE, exist_ok=True)
     # fname_manifest=FNAME_MANIFEST
-    plog("MANIFEST READ: " + TITLE + os.sep + FNAME_MANIFEST)
+    plog("[*] MANIFEST READ: " + TITLE + os.sep + FNAME_MANIFEST)
     try:
-        mnfst = fread(TITLE + os.sep + FNAME_MANIFEST)
+        mnfst = fread(FNAME_MANIFEST, FDIR=TITLE)
     except Exception as e:
         plog(f"[!][ RS ERR ][ MANIFEST SAFE NOT READY {str(e)}]")
         osexit(P_EXIT_FAILURE)
     # fwrite(ID+os.sep+FNAME_MANIFEST,mnfst)
     src_mnfst = bs.BeautifulSoup(mnfst, features="xml")
-    # for val in src_mnfst.find_all('entry')[:3]: # LIMITED
-    #  pass
+    for val in src_mnfst.find_all("entry")[:3]:  # LIMITED
+        plog(str(val))
     file_locs = []
     for val in src_mnfst.find_all("fileLocation"):  # NOT LIMITED
         # 20231004 MP added tiff filter
@@ -714,7 +744,7 @@ def get_source_metadata_all(ID, TITLE, PLATFORM):
                     if HREF[:2] == "./":
                         HREF = HREF[2:]  # 20231109
         # FNAME=FDIR_OUT+TITLE+os.sep+(os.sep.join(tmp_href.split(os.sep)))
-        # plog("href: "+str(HREF))
+        plog("href: " + str(HREF))
         # plog("fname: "+str(FNAME))
     # for idx, loc in enumerate(file_locs):
     #  plog("[ "+str(idx)+" ][ "+loc+" ]")
@@ -741,6 +771,7 @@ def get_metadata_file(TITLE, config, urls, src_fpaths, src_fnames):
     for x in range(len(urls)):
         tfname = TITLE + os.sep + src_fpaths[x] + os.sep + src_fnames[x]
         tdir = FDIR_OUT + os.sep + TITLE + os.sep + src_fpaths[x]
+        tdirx = TITLE + os.sep + src_fpaths[x]
         newdir = Path(tdir)
         newdir.mkdir(parents=True, exist_ok=True)  # 20231019
         print("[+] mkdir: " + tdir + " ... [ O.K. ]")
@@ -755,10 +786,10 @@ def get_metadata_file(TITLE, config, urls, src_fpaths, src_fnames):
         )
         if res:
             if isinstance(res, bytes):
-                fwrite(tfname, res, bin=True)  # 20231108 # handle binary files
-                fwrite(tfname, res, bin=True)  # 20231108 # handle binary files
+                fwrite(tfname, res, tdirx)  # 20231108 # handle binary files
+                # fwrite(tfname, res, bin=True)  # 20231108 # handle binary files
             else:
-                fwrite(tfname, res, bin=False)  # 20231108
+                fwrite(tfname, res, tdirx, pbin=False)  # 20231108
             print("[v] Download: " + urls[x] + " ... [ O.K. ]")
         else:
             print("[!] failed to download: " + urls[x] + " ... [ X ]")
@@ -859,7 +890,7 @@ def cmd_stac(params):
 # TBD: COMPARE register-stac.sh downloaded metadata files to this script downloaded metadata
 # ERR: stac-tools returns: SyntaxError: prefix 'n1' not found in prefix map
 # WARNINGS: FixWindingWarning: The exterior ring of this shape is wound clockwise.
-# '/mnt/sdb1/DHusTools/tmp/mp-sentinel-2-l2a/metadata.xml'
+# /mnt/sdb1/DHusTools/tmp/mp-sentinel-2-l2a/metadata.xml
 def run_stac_tools(STAC_BIN, platform, title, SRC_DIR="./"):
     plog("[I] TITLE TO RUN STAC TOOLS: " + str(title))
     # TBD: Explore windingw no fix
@@ -1145,7 +1176,7 @@ def rmlock():
 # res=test_target_url(config)
 
 
-def get_gsm(config, SRC_PROD_ID):
+def get_gsm(config, SRC_PROD_ID, TITLE):
     fnodexml = "node.xml"
     # download node.xml from source
     gsm = get_source_metadata(config, SRC_PROD_ID)
@@ -1154,14 +1185,13 @@ def get_gsm(config, SRC_PROD_ID):
     if gsm:
         # fnodexml=os.sep+TITLE+os.sep+"node.xml" # n1 bug at the stac runtime
         fnodexml = "node.xml"
-        fwrite(fnodexml, str(gsm))  # HERE
+        fwrite(fnodexml, str(gsm), TITLE)  # HERE
     else:
         plog("Get Source Metadata Returns No Data.")
     # plog(fnodexml)
     plog("GSM DOWNLOADED :" + str(gsm))
     plog("[*] GSM DOWNLOADED")
-    titles = update_source_metadata_nodexml(fnodexml)
-    return titles
+    return fnodexml
 
 
 ####################################################################
@@ -1219,6 +1249,8 @@ def main():
 
         home_folder = os.getenv("HOME")
         plog(f"[*][ RETRIEVED HOME FOLDER PATH {home_folder}]")
+
+        # STAC BINARY LOCATION
         # common pip local install
         # EGI notebooks
         # STAC_BIN='/opt/conda/bin/stac'
@@ -1247,17 +1279,21 @@ def main():
         #
         # Retrieve product metadata from source
         #
-        pro_meta = get_product_metadata(config, SRC_PROD_ID)
         # ADV DEBUG
-        # plog(pro_meta)
-        SRC_PROD_NAME = get_product_name_by_id(pro_meta, SRC_URL)
-        PLATFORM = SRC_PROD_NAME[:2]
-        TITLE = SRC_PROD_NAME
+        # plog(f"PRO_META: {pro_meta}")
+        # SRC_PROD_NAME = get_product_name_by_id(pro_meta, SRC_URL)
+        # PLATFORM = SRC_PROD_NAME[:2]
+        # TITLE = SRC_PROD_NAME
         #  + ".SAFE"
         # PLATFORM=SID[:2] # TBD REVIEW HERE
         # ? from CID,PLATFORM,titles=update_source_metadata_nodexml("node.xml")
-        fnodexml = "node.xml"
-        titles = update_source_metadata_nodexml(fnodexml)
+        # fnodexml = "node.xml"
+        # titles = update_source_metadata_nodexml(fnodexml)
+
+        pro_meta = get_product_metadata(config, SRC_PROD_ID)
+        SRC_PROD_NAME = get_product_name_by_id(pro_meta, SRC_URL)
+        PLATFORM = SRC_PROD_NAME[:2]
+        TITLE = SRC_PROD_NAME
 
         # DEBUG RUNTIME CHECK
         plog("[S] SOURCE PRODUCT ID   : " + SRC_PROD_ID)
@@ -1268,7 +1304,6 @@ def main():
         plog("[T] TARGET HOST         : " + DST_URL)
         plog("[I] TITLE               : " + TITLE)
         plog("[I] PLATFORM            : " + PLATFORM)
-
         #
         # TEST SOURCE AND TARGET AVAILABILITY [ TESTS ONLY? 20231030 ]
         #
@@ -1285,15 +1320,16 @@ def main():
         # get source manifest.safe
         #
         #
-        plog("[*] EVENT: getting source metadata manifest safe")
+        plog("[0] EVENT: getting source metadata manifest safe")
         get_source_metadata_manifest_safe(config, SRC_PROD_ID, TITLE, PLATFORM)
-        plog("[*] EVENT: has source metadata manifest safe")
+        plog("[0] EVENT: has source metadata manifest safe")
 
-        # exit(0)
         # retrieve all source metadata
-        # metadata=get_source_metadata_all(SRC_PROD_NAME,TITLE,PLATFORM)
 
-        titles = get_gsm(config, SRC_PROD_ID)
+        metadata = get_source_metadata_all(SRC_PROD_NAME, TITLE, PLATFORM)
+        plog(f"[I] metadata type: {str(type(metadata))}")
+        fnodexml = get_gsm(config, SRC_PROD_ID, TITLE)
+        titles = update_source_metadata_nodexml(fnodexml, TITLE)
         # plog("GSM DOWNLOADED :" + str(titles))
         # FOR <> S2 REDOWNLOAD xfdumanifest with the GSM data suffix [ instead of SAFE ]
         SUFFIX = "SAFE"
@@ -1308,12 +1344,12 @@ def main():
 
         plog("[*] SRC_PROD_ID: " + SRC_PROD_ID)
 
-        fname_manifest = get_source_metadata_manifest_safe(
-            config, SRC_PROD_ID, TITLE, PLATFORM, SUFFIX
-        )
-        plog(f"[*] fname_manifest: {fname_manifest}")
+        # fname_manifest = get_source_metadata_manifest_safe(
+        #    config, SRC_PROD_ID, TITLE, PLATFORM, SUFFIX
+        # )
+        # plog(f"[*] fname_manifest: {fname_manifest}")
 
-        get_gsm(config, SRC_PROD_ID)
+        # get_gsm(config, SRC_PROD_ID,TITLE)
 
         # metadata=get_source_metadata_all(SRC_PROD_NAME,TITLE+"."+SUFFIX,PLATFORM)
         # gsm = get_source_metadata(config, SRC_PROD_ID)
@@ -1324,6 +1360,7 @@ def main():
         #  fwrite(fnodexml, str(gsm))  # HERE
         # else:
         #  plog("Get Source Metadata Returns No Data.")
+
         # titles = update_source_metadata_nodexml(fnodexml)
 
         # PLACEHOLDER FOR FIXED PROC_CMD_OPTS
@@ -1339,13 +1376,14 @@ def main():
         #
         # Update node.xml source metadata
         #
-        # titles = update_source_metadata_nodexml(fnodexml)
+        titles = update_source_metadata_nodexml(fnodexml, TITLE)
 
         # ADV DEBUG
-        plog("P_ID " + SRC_PROD_ID)
-        plog("TITLE " + TITLE)
-        plog("titles" + str(titles))
-        plog(SRC_PROD_ID)
+        plog("P_ID: " + SRC_PROD_ID)
+        plog("TITLE: " + TITLE)
+        plog("titles: " + str(titles))
+        #
+        plog(f"{titles} {PLATFORM} {DST_COL_TEST_PREFIX}")
 
         #
         # GET DESTIONATION COLLECTION ID FROM PRODUCT ID
@@ -1357,28 +1395,28 @@ def main():
         # metadata=get_source_metadata_all(SRC_PROD_NAME,TITLE,PLATFORM,TITLE)
 
         # ADV DEBUG
-        # plog(src_fnames[:3])
-        # plog(src_paths[:3])
+        plog(f"src_fnames: {src_fnames[:3]}")
+        plog(f"src_paths: {src_paths[:3]}")
 
         #
         # Patch the metadata
         #
         urls2, src_fpaths2, src_fnames2 = metadata_json_patch(
-            config, SRC_URL, src_fnames, src_paths, SRC_PROD_ID, TITLE
+            config, SRC_URL, src_fnames, src_paths, SRC_PROD_ID, TITLE + ".SAFE"
         )
 
-        # plog("URLS2: "+str(urls2))
+        plog("URLS2: " + str(urls2))
         get_metadata_file(TITLE, config, urls2, src_fpaths2, src_fnames2)
 
         plog("src_fnames[:3] " + str(src_fnames[:3]))
         plog("src_fpaths[:3] " + str(src_fpaths2[:3]))
         plog("urls2[:3] " + str(urls2[:3]))
 
-        if titles:
-            if len(titles) > 0:
-                SRC_PROD_NAME = titles[0]
-            else:
-                SRC_PROD_NAME = titles
+        # if titles:
+        #    if len(titles) > 0:
+        #        SRC_PROD_NAME = titles[0]
+        #    else:
+        #        SRC_PROD_NAME = titles
         plog(f"[*][ {SRC_PROD_NAME} ]")
         DST_COLLECTION = translate_prod2col(
             [SRC_PROD_NAME], PLATFORM, DST_COL_TEST_PREFIX
@@ -1426,7 +1464,8 @@ def main():
         # if TITLE.split(".")[1] != "SAFE":
         #  TITLE=TITLE.split(".")[0]+".SAFE"
         plog(f"[*][ New Title {TITLE}")
-        run_stac_tools(STAC_BIN, PLATFORM, TITLE, SRC_DIR)
+        STITLE = TITLE.split(".")[0]
+        run_stac_tools(STAC_BIN, PLATFORM, STITLE, SRC_DIR)
 
         #
         # Get the latest json [ TBD REVIEW TEST ONLY FOR S2A 20231018 ]
