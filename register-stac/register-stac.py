@@ -21,10 +21,10 @@ import traceback
 
 PROGRAM_HEADER = """
 
-VERSION: 0.0.1g
+VERSION: 0.0.1i
 
-Last Update: 20231109
-Last Change: black formatted
+Last Update: 20231114
+Last Change: download core rewritten
 
 Changes:
 20230801 Initial version
@@ -45,6 +45,7 @@ Changes:
 20231107 batch debug test result edits
 20231108 batch debug test result edits
 20231109 batch debug test result edits
+20231114 download core rewritten - due to S3B large files
 
 Description:
 
@@ -104,9 +105,15 @@ def fwrite(file, txt, bin=False):
     if bin:
         f = open(FDIR_OUT + file, "wb")
     else:
+        try:
+            os.mkdir(FDIR_OUT)
+            plog("Created Directory FDIR_OUT")
+        except Exception as e:
+            plog(f"[D] fwrite mkdir exception: {str(e)}")
         f = open(FDIR_OUT + file, "w")
     f.write(txt)
     f.close()
+    plog(f"[F] writen : {FDIR_OUT}{file} {str(bin)}")
     return 0
 
 
@@ -144,7 +151,8 @@ def plog(message, message_priority=1):
             + "]["
             + str(inspect.stack()[1].lineno)
             + "]: "
-            + str(message)
+            + str(message),
+            flush=True,
         )
 
 
@@ -324,7 +332,8 @@ def get_api_large_file(url, basicauth, is_stream):
 
 
 def download_file(url, params, basicauth):
-    resp = None
+    resp = b""
+    cnt = 0
     # try:
     with requests.get(url, params=params, auth=basicauth, stream=True) as r:
         # r.raise_for_status()
@@ -333,20 +342,26 @@ def download_file(url, params, basicauth):
             # If you have chunk encoded response uncomment if
             # and set chunk_size parameter to None.
             if chunk:
+                if cnt % 1000 == 0:
+                    plog(f"[I][{(int(cnt/1000)):07}][ Download chunk ]")
                 try:
                     if not resp:
-                        resp = chunk.decode("utf-8")  # f.write(chunk) txt
+                        # resp = chunk.decode("utf-8")  # f.write(chunk) txt
+                        resp = chunk  # f.write(chunk) txt
                     else:
-                        resp += chunk.decode("utf-8")  # f.write(chunk) txt
+                        # resp += chunk.decode("utf-8")  # f.write(chunk) txt
+                        resp += chunk  # f.write(chunk) txt
                 except Exception as e:
-                    plog(f"[*][ Download chunk .... {str(e)}]")
                     if not resp:
                         resp = chunk  # f.write(chunk) bin
                     else:
                         resp += chunk  # f.write(chunk) bin
+                    if cnt % 1000 == 0:
+                        plog(f"[*][{cnt}][ Download chunk .... {str(e)}]")
+                cnt += 1
     # except Exception as e:
     #  plog("[*][ NO MORE DATA ON STREAM ]")
-    return resp
+    return resp.decode("utf8")
 
 
 #
@@ -416,6 +431,7 @@ def get_api(
     #  print(data["title"])
     # except Exception as e:
     #  exc_handl(e,"[!] Cannot get element from the parsed json")
+    plog(f"[D] sucess at: {url}")
     return data
 
 
@@ -526,7 +542,7 @@ def platform2fname_manifest(P_ID, TITLE, PLATFORM):
     return FNAME_MANIFEST
 
 
-def platform2manifest_url(P_ID, TITLE, PLATFORM):
+def platform2manifest_url(P_ID, TITLE, PLATFORM, SUFFIX):
     FNAME_MANIFEST = platform2fname_manifest(P_ID, TITLE, PLATFORM)
     sub_url = (
         "/odata/v1/Products('"
@@ -539,12 +555,26 @@ def platform2manifest_url(P_ID, TITLE, PLATFORM):
         + FNAME_MANIFEST
         + "')/$value"
     )
-    if PLATFORM == "S1" or PLATFORM == "S2" or PLATFORM == "S3":
+    if PLATFORM == "S1" or PLATFORM == "S2":
         sub_url = (
             "/odata/v1/Products('"
             + P_ID
             + "')/Nodes('"
             + TITLE
+            + "')"
+            + "/"
+            + "Nodes('"
+            + FNAME_MANIFEST
+            + "')/$value"
+        )
+    elif PLATFORM == "S3":
+        sub_url = (
+            "/odata/v1/Products('"
+            + P_ID
+            + "')/Nodes('"
+            + TITLE
+            + "."
+            + SUFFIX
             + "')"
             + "/"
             + "Nodes('"
@@ -568,10 +598,10 @@ def platform2manifest_url(P_ID, TITLE, PLATFORM):
 # /MTD_MSIL2A.xml|MTD_MSIL1C.xml|/MTD_TL.xml|annotation/s1a.*xml"
 # sed 's/.*href="//' | sed 's/".*//' |
 #
-def get_source_metadata_manifest_safe(config, P_ID, TITLE, PLATFORM):
+def get_source_metadata_manifest_safe(config, P_ID, TITLE, PLATFORM, SUFFIX="SAFE"):
     FNAME_MANIFEST = platform2fname_manifest(P_ID, TITLE, PLATFORM)
     plog(f"FNAME_MANIFEST {FNAME_MANIFEST}")
-    sub_url = platform2manifest_url(P_ID, TITLE, PLATFORM)
+    sub_url = platform2manifest_url(P_ID, TITLE, PLATFORM, SUFFIX)
     plog(f"FNAME_URL {sub_url}")
     server = config["source"]["url"]  # REVIEW TBD HERE
     plog(f"SUB_URL: {server}")
@@ -600,8 +630,11 @@ def get_source_metadata_manifest_safe(config, P_ID, TITLE, PLATFORM):
         try:
             # fwrite(TITLE+os.sep+FNAME_MANIFEST,res,bin=True)
             fwrite(TITLE + os.sep + FNAME_MANIFEST, res)
+            if SUFFIX != "SAFE":
+                fwrite(TITLE + "." + SUFFIX + os.sep + FNAME_MANIFEST, res)
             # fwrite(TITLE+os.sep+"manifest.safe",res)
             plog(f"[o] PLATFORM: {PLATFORM}, FNAME: {FNAME_MANIFEST} file saved.")
+            plog(f"[o] TITLE: {TITLE}{os.sep}{FNAME_MANIFEST} stored.")
         except Exception as e:
             msg = "[*] CANNOT SAVE MANIFEST FILE {FNAME_MANIFEST}"
             exc_handl(e, msg, warning=True)
@@ -609,6 +642,7 @@ def get_source_metadata_manifest_safe(config, P_ID, TITLE, PLATFORM):
     else:
         msg = f"[*] CANNOT SAVE MANIFEST FILE {FNAME_MANIFEST}"
         osexit(P_EXIT_FAILURE)
+    return TITLE + os.sep + FNAME_MANIFEST
 
 
 # TEST
@@ -721,6 +755,7 @@ def get_metadata_file(TITLE, config, urls, src_fpaths, src_fnames):
         )
         if res:
             if isinstance(res, bytes):
+                fwrite(tfname, res, bin=True)  # 20231108 # handle binary files
                 fwrite(tfname, res, bin=True)  # 20231108 # handle binary files
             else:
                 fwrite(tfname, res, bin=False)  # 20231108
@@ -1110,6 +1145,25 @@ def rmlock():
 # res=test_target_url(config)
 
 
+def get_gsm(config, SRC_PROD_ID):
+    fnodexml = "node.xml"
+    # download node.xml from source
+    gsm = get_source_metadata(config, SRC_PROD_ID)
+    # plog("GSM: "+gsm)
+    plog("[I] GSM DOWNLOADED")
+    if gsm:
+        # fnodexml=os.sep+TITLE+os.sep+"node.xml" # n1 bug at the stac runtime
+        fnodexml = "node.xml"
+        fwrite(fnodexml, str(gsm))  # HERE
+    else:
+        plog("Get Source Metadata Returns No Data.")
+    # plog(fnodexml)
+    plog("GSM DOWNLOADED :" + str(gsm))
+    plog("[*] GSM DOWNLOADED")
+    titles = update_source_metadata_nodexml(fnodexml)
+    return titles
+
+
 ####################################################################
 #
 # RUNTIME
@@ -1188,19 +1242,18 @@ def main():
         # plog("[*] SRC_URL: "+SRC_URL)
         # plog("[*] DST URL: "+DST_URL)
 
+        SRC_PROD_NAME = None
+
         #
         # Retrieve product metadata from source
         #
         pro_meta = get_product_metadata(config, SRC_PROD_ID)
-
-        SRC_PROD_NAME = None
-
         # ADV DEBUG
         # plog(pro_meta)
         SRC_PROD_NAME = get_product_name_by_id(pro_meta, SRC_URL)
         PLATFORM = SRC_PROD_NAME[:2]
-        TITLE = SRC_PROD_NAME + ".SAFE"
-
+        TITLE = SRC_PROD_NAME
+        #  + ".SAFE"
         # PLATFORM=SID[:2] # TBD REVIEW HERE
         # ? from CID,PLATFORM,titles=update_source_metadata_nodexml("node.xml")
         fnodexml = "node.xml"
@@ -1232,85 +1285,100 @@ def main():
         # get source manifest.safe
         #
         #
-
         plog("[*] EVENT: getting source metadata manifest safe")
         get_source_metadata_manifest_safe(config, SRC_PROD_ID, TITLE, PLATFORM)
         plog("[*] EVENT: has source metadata manifest safe")
 
+        # exit(0)
         # retrieve all source metadata
-
         # metadata=get_source_metadata_all(SRC_PROD_NAME,TITLE,PLATFORM)
 
-        # plog(metadata)
+        titles = get_gsm(config, SRC_PROD_ID)
+        # plog("GSM DOWNLOADED :" + str(titles))
+        # FOR <> S2 REDOWNLOAD xfdumanifest with the GSM data suffix [ instead of SAFE ]
+        SUFFIX = "SAFE"
+        if titles:
+            if len(titles) > 0:
+                if "." in titles[0]:
+                    NSUFFIX = titles[0].split(".")[1]
+                    if NSUFFIX != "SAFE":
+                        plog("[*] Other suffix than SAFE")
+                        SUFFIX = NSUFFIX
+        plog("[*] SUFFIX: " + SUFFIX)
 
-        # download node.xml from source
-        gsm = get_source_metadata(config, SRC_PROD_ID)
-        # plog("GSM: "+gsm)
-        plog("[I] GSM DOWNLOADED")
-        if gsm:
-            # fnodexml=os.sep+TITLE+os.sep+"node.xml" # n1 bug at the stac runtime
-            fnodexml = "node.xml"
-            fwrite(fnodexml, str(gsm))  # HERE
-        else:
-            plog("Get Source Metadata Returns No Data.")
-        # plog(fnodexml)
-        # plog("GSM DOWNLOADED :" + str(gsm))
-        plog("[*] GSM DOWNLOADED")
+        plog("[*] SRC_PROD_ID: " + SRC_PROD_ID)
+
+        fname_manifest = get_source_metadata_manifest_safe(
+            config, SRC_PROD_ID, TITLE, PLATFORM, SUFFIX
+        )
+        plog(f"[*] fname_manifest: {fname_manifest}")
+
+        get_gsm(config, SRC_PROD_ID)
+
+        # metadata=get_source_metadata_all(SRC_PROD_NAME,TITLE+"."+SUFFIX,PLATFORM)
+        # gsm = get_source_metadata(config, SRC_PROD_ID)
+        # plog("[I] GSM DOWNLOADED")
+        # if gsm:
+        #  # fnodexml=os.sep+TITLE+os.sep+"node.xml" # n1 bug at the stac runtime
+        #  fnodexml = "node.xml"
+        #  fwrite(fnodexml, str(gsm))  # HERE
+        # else:
+        #  plog("Get Source Metadata Returns No Data.")
+        # titles = update_source_metadata_nodexml(fnodexml)
 
         # PLACEHOLDER FOR FIXED PROC_CMD_OPTS
 
         #
         # Get the manifest.safe
         #
-        # get_source_metadata_manifest_safe(config,SRC_PROD_ID,TITLE)
 
         #
         # GET ALL SOURCE METADATA - only for given sentinels
         #
-        if PLATFORM == "S1" or PLATFORM == "S2":
-            #
-            # Update node.xml source metadata
-            #
-            titles = update_source_metadata_nodexml(fnodexml)
+        # if PLATFORM == "S1" or PLATFORM == "S2":
+        #
+        # Update node.xml source metadata
+        #
+        # titles = update_source_metadata_nodexml(fnodexml)
 
-            # ADV DEBUG
-            plog("P_ID " + SRC_PROD_ID)
-            plog("TITLE " + TITLE)
-            plog("titles" + str(titles))
-            plog(SRC_PROD_ID)
+        # ADV DEBUG
+        plog("P_ID " + SRC_PROD_ID)
+        plog("TITLE " + TITLE)
+        plog("titles" + str(titles))
+        plog(SRC_PROD_ID)
 
-            #
-            # GET DESTIONATION COLLECTION ID FROM PRODUCT ID
-            #
-            DST_COLLECTION = translate_prod2col(titles, PLATFORM, DST_COL_TEST_PREFIX)
-            plog("DST_COLLECTION: " + DST_COLLECTION)
+        #
+        # GET DESTIONATION COLLECTION ID FROM PRODUCT ID
+        #
+        DST_COLLECTION = translate_prod2col(titles, PLATFORM, DST_COL_TEST_PREFIX)
+        plog("DST_COLLECTION: " + DST_COLLECTION)
 
-            src_fnames, src_paths = get_source_metadata_all(
-                SRC_PROD_NAME, TITLE, PLATFORM
-            )
-            # metadata=get_source_metadata_all(SRC_PROD_NAME,TITLE,PLATFORM,TITLE)
+        src_fnames, src_paths = get_source_metadata_all(SRC_PROD_NAME, TITLE, PLATFORM)
+        # metadata=get_source_metadata_all(SRC_PROD_NAME,TITLE,PLATFORM,TITLE)
 
-            # ADV DEBUG
-            # plog(src_fnames[:3])
-            # plog(src_paths[:3])
+        # ADV DEBUG
+        # plog(src_fnames[:3])
+        # plog(src_paths[:3])
 
-            #
-            # Patch the metadata
-            #
-            urls2, src_fpaths2, src_fnames2 = metadata_json_patch(
-                config, SRC_URL, src_fnames, src_paths, SRC_PROD_ID, TITLE
-            )
+        #
+        # Patch the metadata
+        #
+        urls2, src_fpaths2, src_fnames2 = metadata_json_patch(
+            config, SRC_URL, src_fnames, src_paths, SRC_PROD_ID, TITLE
+        )
 
-            # plog("URLS2: "+str(urls2))
-            get_metadata_file(TITLE, config, urls2, src_fpaths2, src_fnames2)
+        # plog("URLS2: "+str(urls2))
+        get_metadata_file(TITLE, config, urls2, src_fpaths2, src_fnames2)
 
-            plog("src_fanems[:3} " + str(src_fnames[:3]))
-            plog("src_fpaths[:3] " + str(src_fpaths2[:3]))
-            plog("urls2[:3] " + str(urls2[:3]))
+        plog("src_fnames[:3] " + str(src_fnames[:3]))
+        plog("src_fpaths[:3] " + str(src_fpaths2[:3]))
+        plog("urls2[:3] " + str(urls2[:3]))
 
         if titles:
             if len(titles) > 0:
                 SRC_PROD_NAME = titles[0]
+            else:
+                SRC_PROD_NAME = titles
         plog(f"[*][ {SRC_PROD_NAME} ]")
         DST_COLLECTION = translate_prod2col(
             [SRC_PROD_NAME], PLATFORM, DST_COL_TEST_PREFIX
@@ -1350,9 +1418,14 @@ def main():
         plog("SRC_DIR: " + SRC_DIR)
         os.chdir(FDIR_OUT)
         # 20231108 PATCH SAFE
-        if TITLE.split(".")[1] != "SAFE":
-            TITLE = TITLE.split(".")[0] + ".SAFE"
-            plog(f"[*][ New Title {TITLE}")
+        plog(f"[*][ TITLE bf patch {TITLE}")
+        # if not "." in TITLE:
+        #   TITLE=TITLE+".SAFE" # 20231112 thx zsustr
+        # else:
+        #  TITLE=TITLE # +".SAFE"
+        # if TITLE.split(".")[1] != "SAFE":
+        #  TITLE=TITLE.split(".")[0]+".SAFE"
+        plog(f"[*][ New Title {TITLE}")
         run_stac_tools(STAC_BIN, PLATFORM, TITLE, SRC_DIR)
 
         #
