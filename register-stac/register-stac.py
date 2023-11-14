@@ -90,27 +90,52 @@ P_EXIT_SUCESS = 0
 P_EXIT_FAILURE = 1
 
 # DOWNLOAD TIMEOUT
-DOWNLOAD_TIMEOUT = 4096
+# DOWNLOAD_TIMEOUT = 4096
+DOWNLOAD_TIMEOUT = 100
 
 
 # REQ 20230801002 Obtains metadata for the given product from DHuS storage | 003
 # read node.xml
-def fread(file, FDIR=None):
+def fread(pfile, FDIR=None):
+    global FDIR_OUT
     if FDIR is None:
         FDIR = FDIR_OUT
     else:
         FDIR = FDIR_OUT + os.sep + FDIR
     if FDIR[-1] != os.sep:
         FDIR = FDIR + os.sep
-    f = open(FDIR + file, "r")
+    f = open(FDIR + pfile, "r")
     txt = f.read()
     f.close()
+    plog(f"[*][ fread FDIR: {FDIR} pfile: {pfile}")
     return txt
+
+
+def fverify(pfile, FDIR=None):
+    ret = None
+    global FDIR_OUT
+    if FDIR is None:
+        FDIR = FDIR_OUT
+    else:
+        FDIR = FDIR_OUT + os.sep + FDIR
+    if FDIR[-1] != os.sep:
+        FDIR = FDIR + os.sep
+    try:
+        f = open(FDIR + pfile, "r")
+        tmp = len(f.read())
+        f.close()
+        plog(f"[+][ File Verify o.k., size: {str(tmp)}]")
+        ret = True
+    except Exception as e:
+        plog(f"[!][ File Verify not ok. {str(e)}]")
+        ret = False
+    return ret
 
 
 # REQ 20230801002 Obtains metadata for the given product from DHuS storage | 002
 # save node.xml
 def fwrite(pfile, txt, FDIR=None):
+    global FDIR_OUT
     if FDIR is None:
         FDIR = FDIR_OUT
     else:
@@ -118,25 +143,28 @@ def fwrite(pfile, txt, FDIR=None):
     if FDIR[-1] != os.sep:
         FDIR = FDIR + os.sep
     try:
-        newdir = Path(FDIR)
-        newdir.mkdir(parents=True, exist_ok=True)  # 20231019
         plog(f"[*] event: fwrite created directory {FDIR}")
+        newdir = Path(FDIR)
+        # if not newdir.exists():
+        newdir.mkdir(parents=True, exist_ok=True)  # 20231019
     except Exception as e:
         plog(f"[!] warning: fwrite create directory {str(e)} {FDIR}")
     try:
         os.chdir(FDIR)
-    except Exception as e:
-        plog(f"[!] TARGET DIR {FDIR} DOES NOT EXISTS {str(e)}")
-    try:
         if isinstance(txt, bytes):
-            f = open(pfile, "wb")
+            f = open(pfile.split(os.sep)[-1], "wb")
+            f.write(txt)
         else:
-            f = open(pfile, "w")
-        f.write(txt)
+            f = open(pfile.split(os.sep)[-1], "w")
+            f.write(txt)
         f.close()
+        plog(
+            f"[F] written : FDIR: {FDIR} FILE: {pfile} BIN: {str(isinstance(txt, bytes))}"
+        )
+        fverify(pfile)
     except Exception as e:
-        plog(f"[*] error: fwrite cannot write file {pfile} in {FDIR} error: {str(e)}")
-    plog(f"[F] written : FDIR: {FDIR} FILE: {pfile} BIN: {str(isinstance(txt, bytes))}")
+        plog(f"[*] error: fwrite cannot write {pfile} in {FDIR}")
+        plog(f"[*] BIN: {str(isinstance(txt, bytes))} error: {str(e)}")
     return 0
 
 
@@ -421,8 +449,11 @@ def get_api(
 
         # HERE 20231107
         # if "text" not in resp:
-        # resp = requests.get(url,auth=basicauth,params=params)
+        # resp = requests.get(url,auth=basicauth,params=params,timeout=DOWNLOAD_TIMEOUT)
+        # if not resp:
         resp = download_file(url, params, basicauth)
+        # else:
+        # resp = resp.text
 
     except Exception as e:
         # ADV DEBUG: plog(resp)
@@ -790,7 +821,7 @@ def get_metadata_file(TITLE, config, urls, src_fpaths, src_fnames):
                 fwrite(tfname, res, tdirx)  # 20231108 # handle binary files
                 # fwrite(tfname, res, bin=True)  # 20231108 # handle binary files
             else:
-                fwrite(tfname, res, tdirx, pbin=False)  # 20231108
+                fwrite(tfname, res, tdirx)  # 20231114
             print("[v] Download: " + urls[x] + " ... [ O.K. ]")
         else:
             print("[!] failed to download: " + urls[x] + " ... [ X ]")
