@@ -21,10 +21,10 @@ import traceback
 
 PROGRAM_HEADER = """
 
-VERSION: 0.0.1i
+VERSION: 0.0.1j
 
 Last Update: 20231114
-Last Change: download core rewritten
+Last Change: unresolved bug S2 metadata.xml
 
 Changes:
 20230801 Initial version
@@ -360,7 +360,7 @@ def download_file(url, params, basicauth):
     cnt = 0
     # try:
     with requests.get(url, params=params, auth=basicauth, stream=True) as r:
-        # r.raise_for_status()
+        r.raise_for_status()  # HERE 20231114
         # with open(fname, 'wb') as f:
         for chunk in r.iter_content(chunk_size=8192):
             # If you have chunk encoded response uncomment if
@@ -519,7 +519,8 @@ def get_source_metadata(config, P_ID):
 # PREFIX='xmlstarlet sel -d -T -t -v "//_:entry/_:id" node.xml'
 #
 def update_source_metadata_nodexml(fname, TITLE):
-    xml = fread(fname)  # 20231114
+    xml = fread(fname)
+    plog(f"[*][ str(xml) update nodexml: {str(xml)[:500]}")
     # plog(xml)
     src_xml = bs.BeautifulSoup(xml, features="xml")
     titles = []
@@ -1191,7 +1192,19 @@ def get_gsm(config, SRC_PROD_ID, TITLE):
     # plog(fnodexml)
     plog("GSM DOWNLOADED :" + str(gsm))
     plog("[*] GSM DOWNLOADED")
-    return fnodexml
+    return fnodexml, gsm
+
+
+def get_suffix_from_titles(titles):
+    SUFFIX = "SAFE"
+    if titles:
+        if len(titles) > 0:
+            if "." in titles[0]:
+                NSUFFIX = titles[0].split(".")[1]
+                if NSUFFIX != "SAFE":
+                    plog("[*] Other suffix than SAFE")
+                    SUFFIX = NSUFFIX
+    return SUFFIX
 
 
 ####################################################################
@@ -1245,51 +1258,17 @@ def main():
 
         # READ THE CONFIGURATION
         config = read_ini()
-        # res=test_target_url(config)
-
         home_folder = os.getenv("HOME")
         plog(f"[*][ RETRIEVED HOME FOLDER PATH {home_folder}]")
 
         # STAC BINARY LOCATION
-        # common pip local install
-        # EGI notebooks
-        # STAC_BIN='/opt/conda/bin/stac'
-        # STAC_BIN=home_folder+'/.local/bin/stac'
         STAC_BIN = "/usr/local/bin/stac"
-
         SRC_URL = config["source"]["url"]
         DST_URL = config["target"]["url"]
-
         sub_url = "/collections"
-
-        # STACHOST=config["target"]["url"]
-        # P_ID=ID
-
-        # 20231109
-        # TMP="/tmp"
-        # SUCCPREFIX="/var/tmp/register-stac-success-"
-        # ERRPREFIX="/var/tmp/register-stac-error-"
-        # SALT="dhr1"
-
-        # plog("[*] SRC_URL: "+SRC_URL)
-        # plog("[*] DST URL: "+DST_URL)
-
         SRC_PROD_NAME = None
 
-        #
         # Retrieve product metadata from source
-        #
-        # ADV DEBUG
-        # plog(f"PRO_META: {pro_meta}")
-        # SRC_PROD_NAME = get_product_name_by_id(pro_meta, SRC_URL)
-        # PLATFORM = SRC_PROD_NAME[:2]
-        # TITLE = SRC_PROD_NAME
-        #  + ".SAFE"
-        # PLATFORM=SID[:2] # TBD REVIEW HERE
-        # ? from CID,PLATFORM,titles=update_source_metadata_nodexml("node.xml")
-        # fnodexml = "node.xml"
-        # titles = update_source_metadata_nodexml(fnodexml)
-
         pro_meta = get_product_metadata(config, SRC_PROD_ID)
         SRC_PROD_NAME = get_product_name_by_id(pro_meta, SRC_URL)
         PLATFORM = SRC_PROD_NAME[:2]
@@ -1308,82 +1287,32 @@ def main():
         # TEST SOURCE AND TARGET AVAILABILITY [ TESTS ONLY? 20231030 ]
         #
 
-        # tra=test_resto_api(config)
-        # if "stac_version" in tra:
-        #  plog("STAC VERSION: "+tra["stac_version"])
-        #  plog("TARGET SERVER UP")
-
-        # TBD REVIEW
-        # res=test_url_routines(config)
-
-        #
-        # get source manifest.safe
-        #
-        #
         plog("[0] EVENT: getting source metadata manifest safe")
-        get_source_metadata_manifest_safe(config, SRC_PROD_ID, TITLE, PLATFORM)
-        plog("[0] EVENT: has source metadata manifest safe")
-
-        # retrieve all source metadata
-
+        fname_manifest = get_source_metadata_manifest_safe(
+            config, SRC_PROD_ID, TITLE, PLATFORM
+        )
+        plog(f"[0] EVENT: has source metadata manifest safe {fname_manifest}")
         metadata = get_source_metadata_all(SRC_PROD_NAME, TITLE, PLATFORM)
         plog(f"[I] metadata type: {str(type(metadata))}")
-        fnodexml = get_gsm(config, SRC_PROD_ID, TITLE)
+        fnodexml, gsm = get_gsm(config, SRC_PROD_ID, TITLE)
         titles = update_source_metadata_nodexml(fnodexml, TITLE)
-        # plog("GSM DOWNLOADED :" + str(titles))
-        # FOR <> S2 REDOWNLOAD xfdumanifest with the GSM data suffix [ instead of SAFE ]
-        SUFFIX = "SAFE"
-        if titles:
-            if len(titles) > 0:
-                if "." in titles[0]:
-                    NSUFFIX = titles[0].split(".")[1]
-                    if NSUFFIX != "SAFE":
-                        plog("[*] Other suffix than SAFE")
-                        SUFFIX = NSUFFIX
-        plog("[*] SUFFIX: " + SUFFIX)
-
+        SUFFIX = get_suffix_from_titles(titles)
+        plog(f"[*] titles: {str(titles)} SUFFIX: {SUFFIX}")
         plog("[*] SRC_PROD_ID: " + SRC_PROD_ID)
-
-        # fname_manifest = get_source_metadata_manifest_safe(
-        #    config, SRC_PROD_ID, TITLE, PLATFORM, SUFFIX
-        # )
-        # plog(f"[*] fname_manifest: {fname_manifest}")
-
-        # get_gsm(config, SRC_PROD_ID,TITLE)
-
-        # metadata=get_source_metadata_all(SRC_PROD_NAME,TITLE+"."+SUFFIX,PLATFORM)
-        # gsm = get_source_metadata(config, SRC_PROD_ID)
-        # plog("[I] GSM DOWNLOADED")
-        # if gsm:
-        #  # fnodexml=os.sep+TITLE+os.sep+"node.xml" # n1 bug at the stac runtime
-        #  fnodexml = "node.xml"
-        #  fwrite(fnodexml, str(gsm))  # HERE
-        # else:
-        #  plog("Get Source Metadata Returns No Data.")
-
-        # titles = update_source_metadata_nodexml(fnodexml)
-
         # PLACEHOLDER FOR FIXED PROC_CMD_OPTS
-
-        #
         # Get the manifest.safe
-        #
-
-        #
         # GET ALL SOURCE METADATA - only for given sentinels
-        #
         # if PLATFORM == "S1" or PLATFORM == "S2":
-        #
         # Update node.xml source metadata
-        #
-        titles = update_source_metadata_nodexml(fnodexml, TITLE)
 
         # ADV DEBUG
-        plog("P_ID: " + SRC_PROD_ID)
-        plog("TITLE: " + TITLE)
-        plog("titles: " + str(titles))
+        # plog("P_ID: " + SRC_PROD_ID)
+        # plog("TITLE: " + TITLE)
+        # plog("titles: " + str(titles))
         #
-        plog(f"{titles} {PLATFORM} {DST_COL_TEST_PREFIX}")
+        plog(
+            f"[*] titles {titles} PLATFORM {PLATFORM} COL_PREFIX {DST_COL_TEST_PREFIX}"
+        )
 
         #
         # GET DESTIONATION COLLECTION ID FROM PRODUCT ID
@@ -1392,11 +1321,9 @@ def main():
         plog("DST_COLLECTION: " + DST_COLLECTION)
 
         src_fnames, src_paths = get_source_metadata_all(SRC_PROD_NAME, TITLE, PLATFORM)
-        # metadata=get_source_metadata_all(SRC_PROD_NAME,TITLE,PLATFORM,TITLE)
-
         # ADV DEBUG
-        plog(f"src_fnames: {src_fnames[:3]}")
-        plog(f"src_paths: {src_paths[:3]}")
+        # plog(f"src_fnames: {src_fnames[:3]}")
+        # plog(f"src_paths: {src_paths[:3]}")
 
         #
         # Patch the metadata
@@ -1406,11 +1333,13 @@ def main():
         )
 
         plog("URLS2: " + str(urls2))
+        # These are the larger downloads
         get_metadata_file(TITLE, config, urls2, src_fpaths2, src_fnames2)
 
-        plog("src_fnames[:3] " + str(src_fnames[:3]))
-        plog("src_fpaths[:3] " + str(src_fpaths2[:3]))
-        plog("urls2[:3] " + str(urls2[:3]))
+        # ADV DEBUG
+        # plog("src_fnames[:3] " + str(src_fnames[:3]))
+        # plog("src_fpaths[:3] " + str(src_fpaths2[:3]))
+        # plog("urls2[:3] " + str(urls2[:3]))
 
         # if titles:
         #    if len(titles) > 0:
@@ -1428,22 +1357,16 @@ def main():
         plog("SOURCE PRODUCT ID: " + SRC_PROD_ID)
         plog("DST_COLLECTION: " + DST_COLLECTION)
         plog("PLATFORM: " + PLATFORM)
-        #
         # Translate source product ID to target collection ID
-        #
         # TBD REVIEW HERE CHECK IF COLLECTION EXISTS IN TARGET
-        #
-
-        #
         # Run the stac tools [ TBD REVIEW TEST ONLY FOR S2A 20231018 ]
-        #
+        plog("[>] Run the stac tools [...]")
         TITLE = titles[0]
         # SRC_DIR="./tmp"
         plog("STAC_BIN: " + STAC_BIN)
         plog("PLATFORM: " + PLATFORM)
         plog("TITLE: " + TITLE)
         plog("DST_COLLECTION: " + DST_COLLECTION)
-
         # PATCH 20231106
         # if PLATFORM == "S5":
         #  plog("Not Patching TITLE: "+TITLE)
@@ -1457,6 +1380,7 @@ def main():
         os.chdir(FDIR_OUT)
         # 20231108 PATCH SAFE
         plog(f"[*][ TITLE bf patch {TITLE}")
+
         # if not "." in TITLE:
         #   TITLE=TITLE+".SAFE" # 20231112 thx zsustr
         # else:
