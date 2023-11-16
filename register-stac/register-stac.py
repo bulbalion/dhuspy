@@ -21,10 +21,10 @@ import traceback
 
 PROGRAM_HEADER = """
 
-VERSION: 0.0.1k
+VERSION: 0.0.1m
 
-Last Update: 20231116
-Last Change: new download core, pdb script, S2A ok
+Last Update: 20231117
+Last Change: skip cached files, tested S2A, S2B
 
 Changes:
 20230801 Initial version
@@ -47,6 +47,7 @@ Changes:
 20231109 batch debug test result edits
 20231114 download core rewritten - due to S3B large files
 20231116 new download core, pdb script, S2A ok
+20231117 skip cached files, tested S2A, S2B
 
 Description:
 
@@ -110,7 +111,7 @@ def patch_fdir(FDIR):
 # read node.xml
 def fread(pfile, FDIR=None):
     FDIR = patch_fdir(FDIR)
-    f = open(FDIR + pfile, "r")
+    f = open(FDIR + pfile, "rb")
     txt = f.read()
     f.close()
     plog(f"[*][ fread FDIR: {FDIR} pfile: {pfile}")
@@ -118,29 +119,32 @@ def fread(pfile, FDIR=None):
 
 
 def fverify(pfile, sz=None, FDIR=None):
+    tmp = 0
     ret = None
     FDIR = patch_fdir(FDIR)
+    os.chdir(FDIR)
     try:
-        f = open(FDIR + pfile, "r")
+        f = open(pfile, "r")
         tmp = len(f.read())
         f.close()
         plog(
             f"[+][ File {pfile} verify as txt o.k., size: {str(tmp)} b expected: {str(sz)}]"
         )
-        ret = True
+        # ret = True
     except Exception as e:
         plog(f"[!][ File {pfile} Verify as txt not o.k. {str(e)}]")
         try:
-            f = open(FDIR + pfile, "rb")
+            f = open(pfile, "rb")
             tmp = len(f.read())
             f.close()
             plog(f"[+][ File {pfile} verify as bin o.k., size: {str(tmp)} b]")
-            ret = True
+            # ret = True
         except Exception as et:
             plog(f"[!][ File {pfile} Verify not o.k. {str(et)}]")
             ret = False
     if sz == tmp:
         plog(f"[*][ File {pfile} download size equals header file size ]")
+        ret = True
     return ret
 
 
@@ -148,6 +152,8 @@ def fverify(pfile, sz=None, FDIR=None):
 # save node.xml
 def fwrite(pfile, txt, FDIR=None):
     FDIR = patch_fdir(FDIR)
+    # if fverify(pfile, len(txt), "./"):  # 20231116 # clobber off
+    #  return 0
     try:
         plog(f"[*] event: fwrite created directory {FDIR}")
         newdir = Path(FDIR)
@@ -157,17 +163,20 @@ def fwrite(pfile, txt, FDIR=None):
         plog(f"[!] warning: fwrite create directory {str(e)} {FDIR}")
     try:
         os.chdir(FDIR)
+        fpfile = pfile
+        if os.sep in pfile:
+            fpfile = pfile.split(os.sep)[-1]
         if isinstance(txt, bytes):
-            f = open(pfile.split(os.sep)[-1], "wb")
+            f = open(fpfile, "wb")
             f.write(txt)
         else:
-            f = open(pfile.split(os.sep)[-1], "w")
+            f = open(fpfile, "w")
             f.write(txt)
         f.close()
         plog(
             f"[F] written : FDIR: {FDIR} FILE: {pfile} BIN: {str(isinstance(txt, bytes))}"
         )
-        fverify(pfile, len(txt))
+        fverify(fpfile, len(txt), FDIR)  # 20231116
     except Exception as e:
         plog(f"[*] error: fwrite cannot write {pfile} in {FDIR}")
         plog(f"[*] BIN: {str(isinstance(txt, bytes))} error: {str(e)}")
@@ -395,16 +404,20 @@ def get_api_large_file(url, basicauth, is_stream):
 
 
 def get_download_size(sz, exp_sz):
-    pct = int(sz / int(exp_sz) * 100)
-    plog(f"[I][{pct:03}][ Download Percent: {pct:03}% ][ {sz:12} b / {exp_sz:12} b ]")
+    if exp_sz != 0:
+        pct = int(sz / int(exp_sz) * 100)
+        plog(
+            f"[I][{pct:03}][ Download Percent: {pct:03}% ][ {sz:12} b / {exp_sz:12} b ]"
+        )
 
 
 def get_progress(cnt, exp_sz):
-    blocks = int(cnt * 8192)
-    pct = int(blocks / int(exp_sz) * 100)
-    plog(
-        f"[I][{pct:03}][ Download Percent: {pct:03}% ][ {cnt*8192:12} b / {exp_sz:12} b ]"
-    )
+    if exp_sz != 0:
+        blocks = int(cnt * 8192)
+        pct = int(blocks / int(exp_sz) * 100)
+        plog(
+            f"[I][{pct:03}][ Download Percent: {pct:03}% ][ {cnt*8192:12} b / {exp_sz:12} b ]"
+        )
 
 
 def download_file(url, params, basicauth):
@@ -417,12 +430,18 @@ def download_file(url, params, basicauth):
     # resp = requests.get(url,auth=basicauth,params=params,timeout=DOWNLOAD_TIMEOUT)
     # use requests.get(url, stream=True).headers['Content-length']
     with requests.get(url, params=params, auth=basicauth, stream=True) as r:
-        if new:
-            plog(r.headers)
-            exp_sz = r.headers["Content-Length"]
-            # iexp_sz=int(int(exp_sz)/1024/1024)
-            plog(f"[*] Expected download size: {str(exp_sz)} b ]")
-            new = False
+        try:
+            if new:
+                plog(r.headers)
+                if "Content-Length" in r.headers:
+                    exp_sz = r.headers["Content-Length"]
+                    # iexp_sz=int(int(exp_sz)/1024/1024)
+                    plog(f"[*] Expected download size: {str(exp_sz)} b ]")
+                else:
+                    exp_sz = 0
+        except Exception as e:
+            plog(f"[!] error while expected size retrieval {str(e)}")
+        new = False
         r.raise_for_status()  # HERE 20231114
         # with open(fname, 'wb') as f:
         for chunk in r.iter_content(chunk_size=8192):
@@ -494,8 +513,6 @@ def get_api(
         # resp = resp.text
         # if not resp:
         resp = download_file(url, params, basicauth)
-        # else:
-
     except Exception as e:
         # ADV DEBUG: plog(resp)
         exc_handl(e, "[!] Cannot download the result page")
@@ -693,8 +710,7 @@ def platform2manifest_url(P_ID, TITLE, PLATFORM, SUFFIX):
     #        + "')/$value"
     #    )
     else:
-        # sub_url = "/odata/v1/Products('"+P_ID+"')/$value"
-        # sub_url = "/odata/v1/Products('"+P_ID+"')"
+        # sub_url = "/odata/v1/Products('" + P_ID + "')"
         sub_url = "/odata/v1/Products('" + P_ID + "')/$value"
     return sub_url
 
@@ -860,22 +876,50 @@ def get_metadata_file(TITLE, config, urls, src_fpaths, src_fnames):
         # print("[+] mkdir: " + tdir + " ... [ O.K. ]")
         plog("urls [" + str(x) + "]: " + urls[x] + " -> " + tdir)
         # 20231020
-        res = get_api(
-            src_server,
-            urls[x],
-            user=config["source"]["username"],
-            password=config["source"]["password"],
-            is_stream=False,
-        )
-        if res:
-            if isinstance(res, bytes):
-                fwrite(tfname, res, tdirx)  # 20231108 # handle binary files
-                # fwrite(tfname, res, bin=True)  # 20231108 # handle binary files
+        # fverify(tfname, res, tdirx)  # 20231114
+        # try to get dest size
+        exp_sz = 0
+        fdown_sz = 0
+        try:
+            tmp_basicauth = None
+            user = config["source"]["username"]
+            password = config["source"]["password"]
+            if user and password:
+                tmp_basicauth = HTTPBasicAuth(user, password)
+            tmp_url = "https://" + src_server + urls[x]
+            tmp_params = dict()
+            with requests.get(
+                tmp_url, params=tmp_params, auth=tmp_basicauth, stream=True
+            ) as r:
+                if "Content-Length" in r.headers:
+                    exp_sz = int(r.headers["Content-Length"])
+                    # plog()
+            fdown_sz = len(fread(tfname, FDIR="./"))
+        except Exception as e:
+            exc_handl(
+                e, f"[*] Expected download size: {str(exp_sz)} b Error: {str(e)} ]"
+            )
+        plog(f"[I] re-download decision exp_sz: {exp_sz} fdown_sz: {fdown_sz} ")
+        if exp_sz != fdown_sz:
+            # GET THE FILE
+            res = get_api(
+                src_server,
+                urls[x],
+                user=config["source"]["username"],
+                password=config["source"]["password"],
+                is_stream=False,
+            )
+            if res:
+                if isinstance(res, bytes):
+                    fwrite(tfname, res, tdirx)  # 20231108 # handle binary files
+                    # fwrite(tfname, res, bin=True)  # 20231108 # handle binary files
+                else:
+                    fwrite(tfname, res, tdirx)  # 20231114
+                print("[v] Download: " + urls[x] + " ... [ O.K. ]")
             else:
-                fwrite(tfname, res, tdirx)  # 20231114
-            print("[v] Download: " + urls[x] + " ... [ O.K. ]")
+                print("[!] failed to download: " + urls[x] + " ... [ X ]")
         else:
-            print("[!] failed to download: " + urls[x] + " ... [ X ]")
+            print(f"[C] File Download skip (cached) File: {tfname} Size: {fdown_sz}")
 
 
 # PATIENCE (takes cca 10 secs., opt. candidate)
@@ -1088,8 +1132,9 @@ def update_json_hrefs(HOST, P_ID, fname, fname_out="resto-test_upload.json"):
     plog("res href: " + debug_test_href)
     upload_json = djson
     djson = orig_json
-    fwrite(fname_out, json.dumps(upload_json))
+    fwrite(fname_out, json.dumps(upload_json), "./")
     # print(upload_json)
+    return fname_out, upload_json
 
 
 # TEST
@@ -1267,7 +1312,6 @@ def get_gsm(config, SRC_PROD_ID, TITLE):
     plog("[I] GSM DOWNLOADED")
     if gsm:
         # fnodexml=os.sep+TITLE+os.sep+"node.xml" # n1 bug at the stac runtime
-        fnodexml = "node.xml"
         fwrite(fnodexml, str(gsm), TITLE)  # HERE
     else:
         plog("Get Source Metadata Returns No Data.")
@@ -1335,8 +1379,8 @@ def main():
         SRC_PROD_ID = None
 
         # FILE VARIABLES
-        SRC_PROD_ID = proc_cmd_opts()
-        check_source_id(SRC_PROD_ID)
+        INP_PROD_ID = proc_cmd_opts()
+        check_source_id(INP_PROD_ID)
         # READ THE CONFIGURATION
         config = read_ini()
         home_folder = os.getenv("HOME")
@@ -1350,12 +1394,19 @@ def main():
         SRC_PROD_NAME = None
 
         # Retrieve product metadata from source
-        pro_meta = get_product_metadata(config, SRC_PROD_ID)
+        pro_meta = get_product_metadata(config, INP_PROD_ID)
+        # 20231116 # get the product id soonest
+        # src_xml = bs.BeautifulSoup(pro_meta, features="xml")
+        # for val in src_xml.find_all("entry"):  # LIMITED
+        #    src_prod_id = str(val.find("Name").get_text())
+        # plog(f"src_prod_id: {src_prod_id}")
+
         SRC_PROD_NAME = get_product_name_by_id(pro_meta, SRC_URL)
         PLATFORM = SRC_PROD_NAME[:2]
-        fwrite(SRC_PROD_NAME, pro_meta)  # HERE
-        SRC_PROD_NAME = SRC_PROD_NAME + ".SAFE"  # 20231116 thx zsustr
-        fnodexml, gsm = get_gsm(config, SRC_PROD_ID, SRC_PROD_NAME)
+        # if PLATFORM!="S5":
+        #  fwrite(SRC_PROD_NAME, pro_meta)  # HERE
+        # SRC_PROD_NAME = SRC_PROD_NAME + ".SAFE"  # 20231116 thx zsustr
+        fnodexml, gsm = get_gsm(config, INP_PROD_ID, SRC_PROD_NAME + ".SAFE")
         # 20231116 # get the product id soonest
         src_xml = bs.BeautifulSoup(gsm, features="xml")
         src_prod_id = ""
@@ -1363,8 +1414,8 @@ def main():
             src_prod_id = str(val.find("Name").get_text())
         plog(f"src_prod_id: {src_prod_id}")
         # 20231116
-        # SRC_PROD_ID=src_prod_id
-        SRC_PROD_NAME = src_prod_id
+        SRC_PROD_ID = src_prod_id
+        # fwrite(SRC_PROD_ID, pro_meta)  # HERE 20231116
 
         # DEBUG RUNTIME CHECK
         plog("[S] SOURCE PRODUCT ID   : " + SRC_PROD_ID)
@@ -1381,13 +1432,14 @@ def main():
 
         # if PLATFORM != "S3":
         plog("[0] EVENT: getting source metadata manifest safe")
+        # 20231117
         fname_manifest = get_source_metadata_manifest_safe(
-            config, SRC_PROD_ID, SRC_PROD_NAME, PLATFORM
+            config, INP_PROD_ID, SRC_PROD_ID, PLATFORM
         )
         plog(f"[0] EVENT: has source metadata manifest safe {fname_manifest}")
-        metadata = get_source_metadata_all(SRC_PROD_NAME, SRC_PROD_NAME, PLATFORM)
+        metadata = get_source_metadata_all(SRC_PROD_ID, SRC_PROD_ID, PLATFORM)
         plog(f"[I] metadata type: {str(type(metadata))}")
-        fnodexml, gsm = get_gsm(config, SRC_PROD_ID, SRC_PROD_NAME)
+        fnodexml, gsm = get_gsm(config, INP_PROD_ID, SRC_PROD_ID)
         titles = update_source_metadata_nodexml(fnodexml, SRC_PROD_NAME)
         SUFFIX = get_suffix_from_titles(titles)
         plog(f"[*] titles: {str(titles)} SUFFIX: {SUFFIX}")
@@ -1413,7 +1465,7 @@ def main():
         plog("DST_COLLECTION: " + DST_COLLECTION)
 
         src_fnames, src_paths = get_source_metadata_all(
-            SRC_PROD_NAME, SRC_PROD_NAME, PLATFORM
+            SRC_PROD_ID, SRC_PROD_ID, PLATFORM
         )
         # ADV DEBUG
         # plog(f"src_fnames: {src_fnames[:3]}")
@@ -1423,12 +1475,12 @@ def main():
         # Patch the metadata
         #
         urls2, src_fpaths2, src_fnames2 = metadata_json_patch(
-            config, SRC_URL, src_fnames, src_paths, SRC_PROD_ID, SRC_PROD_NAME
+            config, SRC_URL, src_fnames, src_paths, INP_PROD_ID, SRC_PROD_ID
         )
 
         plog("URLS2: " + str(urls2))
         # These are the larger downloads
-        get_metadata_file(SRC_PROD_NAME, config, urls2, src_fpaths2, src_fnames2)
+        get_metadata_file(SRC_PROD_ID, config, urls2, src_fpaths2, src_fnames2)
 
         # ADV DEBUG
         # plog("src_fnames[:3] " + str(src_fnames[:3]))
@@ -1484,9 +1536,10 @@ def main():
         # if TITLE.split(".")[1] != "SAFE":
         #  TITLE=TITLE.split(".")[0]+".SAFE"
         plog(f"[*][ New Title {TITLE}")
-        # STITLE = TITLE.split(".")[0]
+        # if PLATFORM=="S5":
+        #  STITLE = TITLE.split(".")[0]+".SAFE"
         # run_stac_tools(STAC_BIN, PLATFORM, STITLE, SRC_DIR)
-        run_stac_tools(STAC_BIN, PLATFORM, SRC_PROD_NAME, SRC_DIR)  # 20231116
+        run_stac_tools(STAC_BIN, PLATFORM, SRC_PROD_ID, SRC_DIR)  # 20231116
 
         #
         # Get the latest json [ TBD REVIEW TEST ONLY FOR S2A 20231018 ]
@@ -1499,7 +1552,7 @@ def main():
         #
         # Patch the JSON
         #
-        update_json_hrefs(
+        ujh_fname_out, ujh_upload_json = update_json_hrefs(
             DST_URL,
             SRC_PROD_ID,
             fname,
@@ -1537,7 +1590,8 @@ def main():
         # upload_res=upload_collection(config,fname_out,DST_COLLECTION+"",PLATFORM)
         upload_res = upload_collection(config, fname_out, DST_COLLECTION, PLATFORM)
 
-        # DEBUG plog(upload_res)
+        # DEBUG
+        plog(f"[R] Upload Result: {upload_res}")
 
         # UPLOAD RETURN VALUES
         # print(upload_res)
@@ -1593,14 +1647,13 @@ def main():
             if "id" in upload_verify_res:
                 if upload_verify_res["id"] == upload_res["features"][0]["featureId"]:
                     plog("[+] UPLOAD VERIFY O.K.")
+                    # fwrite(SRC_PROD_NAME + "_app_db.json", json.dumps(upload_res))
                     fwrite(SRC_PROD_NAME + ".json", json.dumps(upload_res))
         else:
             plog("[*] Not verifyng upload.")
 
         plog("[+] PROGRAM COMPLETED. Exiting...")
 
-        # REMOVE THE LOCK FILE
-        rmlock()
         # RETURN CONTROL TO SHELL
         osexit(P_EXIT_SUCESS)  # 20231016
     except Exception as e:
