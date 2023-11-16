@@ -21,10 +21,10 @@ import traceback
 
 PROGRAM_HEADER = """
 
-VERSION: 0.0.1j
+VERSION: 0.0.1k
 
-Last Update: 20231114
-Last Change: unresolved bug S2 metadata.xml
+Last Update: 20231116
+Last Change: new download core, pdb script, S2A ok
 
 Changes:
 20230801 Initial version
@@ -46,6 +46,7 @@ Changes:
 20231108 batch debug test result edits
 20231109 batch debug test result edits
 20231114 download core rewritten - due to S3B large files
+20231116 new download core, pdb script, S2A ok
 
 Description:
 
@@ -94,9 +95,7 @@ P_EXIT_FAILURE = 1
 DOWNLOAD_TIMEOUT = 100
 
 
-# REQ 20230801002 Obtains metadata for the given product from DHuS storage | 003
-# read node.xml
-def fread(pfile, FDIR=None):
+def patch_fdir(FDIR):
     global FDIR_OUT
     if FDIR is None:
         FDIR = FDIR_OUT
@@ -104,6 +103,13 @@ def fread(pfile, FDIR=None):
         FDIR = FDIR_OUT + os.sep + FDIR
     if FDIR[-1] != os.sep:
         FDIR = FDIR + os.sep
+    return FDIR
+
+
+# REQ 20230801002 Obtains metadata for the given product from DHuS storage | 003
+# read node.xml
+def fread(pfile, FDIR=None):
+    FDIR = patch_fdir(FDIR)
     f = open(FDIR + pfile, "r")
     txt = f.read()
     f.close()
@@ -113,21 +119,15 @@ def fread(pfile, FDIR=None):
 
 def fverify(pfile, FDIR=None):
     ret = None
-    global FDIR_OUT
-    if FDIR is None:
-        FDIR = FDIR_OUT
-    else:
-        FDIR = FDIR_OUT + os.sep + FDIR
-    if FDIR[-1] != os.sep:
-        FDIR = FDIR + os.sep
+    FDIR = patch_fdir(FDIR)
     try:
         f = open(FDIR + pfile, "r")
         tmp = len(f.read())
         f.close()
-        plog(f"[+][ File Verify o.k., size: {str(tmp)}]")
+        plog(f"[+][ File {pfile} verify o.k., size: {str(tmp)} b]")
         ret = True
     except Exception as e:
-        plog(f"[!][ File Verify not ok. {str(e)}]")
+        plog(f"[!][ File {pfile} Verify not o.k. {str(e)}]")
         ret = False
     return ret
 
@@ -135,13 +135,7 @@ def fverify(pfile, FDIR=None):
 # REQ 20230801002 Obtains metadata for the given product from DHuS storage | 002
 # save node.xml
 def fwrite(pfile, txt, FDIR=None):
-    global FDIR_OUT
-    if FDIR is None:
-        FDIR = FDIR_OUT
-    else:
-        FDIR = FDIR_OUT + os.sep + FDIR
-    if FDIR[-1] != os.sep:
-        FDIR = FDIR + os.sep
+    FDIR = patch_fdir(FDIR)
     try:
         plog(f"[*] event: fwrite created directory {FDIR}")
         newdir = Path(FDIR)
@@ -450,10 +444,10 @@ def get_api(
         # HERE 20231107
         # if "text" not in resp:
         # resp = requests.get(url,auth=basicauth,params=params,timeout=DOWNLOAD_TIMEOUT)
+        # resp = resp.text
         # if not resp:
         resp = download_file(url, params, basicauth)
         # else:
-        # resp = resp.text
 
     except Exception as e:
         # ADV DEBUG: plog(resp)
@@ -618,9 +612,7 @@ def platform2manifest_url(P_ID, TITLE, PLATFORM, SUFFIX):
             "/odata/v1/Products('"
             + P_ID
             + "')/Nodes('"
-            + TITLE
-            + "."
-            + SUFFIX
+            + TITLE  # .SUFFIX 20231116
             + "')"
             + "/"
             + "Nodes('"
@@ -722,11 +714,11 @@ def get_source_metadata_manifest_safe(config, P_ID, TITLE, PLATFORM, SUFFIX="SAF
 # get_api(hostname,sub_url,params=dict(),user=None,password=None):
 
 
-def get_product_metadata(config, P_ID):
+def get_product_metadata(config, SRC_PROD_ID):
     # server= "dhr1.cesnet.cz"
     # api_protocol="https://"
     server = config["source"]["url"]  # REVIEW TBD HERE
-    sub_url = "/odata/v1/Products('" + P_ID + "')"
+    sub_url = "/odata/v1/Products('" + SRC_PROD_ID + "')"
     res = get_api(
         server,
         sub_url,
@@ -804,9 +796,9 @@ def get_metadata_file(TITLE, config, urls, src_fpaths, src_fnames):
         tfname = TITLE + os.sep + src_fpaths[x] + os.sep + src_fnames[x]
         tdir = FDIR_OUT + os.sep + TITLE + os.sep + src_fpaths[x]
         tdirx = TITLE + os.sep + src_fpaths[x]
-        newdir = Path(tdir)
-        newdir.mkdir(parents=True, exist_ok=True)  # 20231019
-        print("[+] mkdir: " + tdir + " ... [ O.K. ]")
+        # newdir = Path(tdir)
+        # newdir.mkdir(parents=True, exist_ok=True)  # 20231019
+        # print("[+] mkdir: " + tdir + " ... [ O.K. ]")
         plog("urls [" + str(x) + "]: " + urls[x] + " -> " + tdir)
         # 20231020
         res = get_api(
@@ -1286,7 +1278,6 @@ def main():
         # FILE VARIABLES
         SRC_PROD_ID = proc_cmd_opts()
         check_source_id(SRC_PROD_ID)
-
         # READ THE CONFIGURATION
         config = read_ini()
         home_folder = os.getenv("HOME")
@@ -1303,7 +1294,8 @@ def main():
         pro_meta = get_product_metadata(config, SRC_PROD_ID)
         SRC_PROD_NAME = get_product_name_by_id(pro_meta, SRC_URL)
         PLATFORM = SRC_PROD_NAME[:2]
-        TITLE = SRC_PROD_NAME
+        fwrite(SRC_PROD_NAME, pro_meta)  # HERE
+        SRC_PROD_NAME = SRC_PROD_NAME + ".SAFE"  # 20231116 thx zsustr
 
         # DEBUG RUNTIME CHECK
         plog("[S] SOURCE PRODUCT ID   : " + SRC_PROD_ID)
@@ -1312,7 +1304,7 @@ def main():
         plog("[S] SOURCE HOST         : " + SRC_URL)
         plog("[T] TARGET USER         : " + config["target"]["username"])
         plog("[T] TARGET HOST         : " + DST_URL)
-        plog("[I] TITLE               : " + TITLE)
+        # plog("[I] TITLE               : " + TITLE) # 20231116
         plog("[I] PLATFORM            : " + PLATFORM)
         #
         # TEST SOURCE AND TARGET AVAILABILITY [ TESTS ONLY? 20231030 ]
@@ -1320,13 +1312,13 @@ def main():
 
         plog("[0] EVENT: getting source metadata manifest safe")
         fname_manifest = get_source_metadata_manifest_safe(
-            config, SRC_PROD_ID, TITLE, PLATFORM
+            config, SRC_PROD_ID, SRC_PROD_NAME, PLATFORM
         )
         plog(f"[0] EVENT: has source metadata manifest safe {fname_manifest}")
-        metadata = get_source_metadata_all(SRC_PROD_NAME, TITLE, PLATFORM)
+        metadata = get_source_metadata_all(SRC_PROD_NAME, SRC_PROD_NAME, PLATFORM)
         plog(f"[I] metadata type: {str(type(metadata))}")
-        fnodexml, gsm = get_gsm(config, SRC_PROD_ID, TITLE)
-        titles = update_source_metadata_nodexml(fnodexml, TITLE)
+        fnodexml, gsm = get_gsm(config, SRC_PROD_ID, SRC_PROD_NAME)
+        titles = update_source_metadata_nodexml(fnodexml, SRC_PROD_NAME)
         SUFFIX = get_suffix_from_titles(titles)
         plog(f"[*] titles: {str(titles)} SUFFIX: {SUFFIX}")
         plog("[*] SRC_PROD_ID: " + SRC_PROD_ID)
@@ -1338,7 +1330,6 @@ def main():
 
         # ADV DEBUG
         # plog("P_ID: " + SRC_PROD_ID)
-        # plog("TITLE: " + TITLE)
         # plog("titles: " + str(titles))
         #
         plog(
@@ -1351,7 +1342,9 @@ def main():
         DST_COLLECTION = translate_prod2col(titles, PLATFORM, DST_COL_TEST_PREFIX)
         plog("DST_COLLECTION: " + DST_COLLECTION)
 
-        src_fnames, src_paths = get_source_metadata_all(SRC_PROD_NAME, TITLE, PLATFORM)
+        src_fnames, src_paths = get_source_metadata_all(
+            SRC_PROD_NAME, SRC_PROD_NAME, PLATFORM
+        )
         # ADV DEBUG
         # plog(f"src_fnames: {src_fnames[:3]}")
         # plog(f"src_paths: {src_paths[:3]}")
@@ -1360,12 +1353,12 @@ def main():
         # Patch the metadata
         #
         urls2, src_fpaths2, src_fnames2 = metadata_json_patch(
-            config, SRC_URL, src_fnames, src_paths, SRC_PROD_ID, TITLE + ".SAFE"
+            config, SRC_URL, src_fnames, src_paths, SRC_PROD_ID, SRC_PROD_NAME
         )
 
         plog("URLS2: " + str(urls2))
         # These are the larger downloads
-        get_metadata_file(TITLE, config, urls2, src_fpaths2, src_fnames2)
+        get_metadata_file(SRC_PROD_NAME, config, urls2, src_fpaths2, src_fnames2)
 
         # ADV DEBUG
         # plog("src_fnames[:3] " + str(src_fnames[:3]))
@@ -1412,15 +1405,18 @@ def main():
         # 20231108 PATCH SAFE
         plog(f"[*][ TITLE bf patch {TITLE}")
 
-        # if not "." in TITLE:
-        #   TITLE=TITLE+".SAFE" # 20231112 thx zsustr
+        # 20231114
+        # fwrite("metadata.xml",pro_meta,FDIR=TITLE) # 20231116
+        # fwrite("metadata.xml",pro_meta,FDIR=TITLE+os.sep+TITLE) # 20231116
+
         # else:
         #  TITLE=TITLE # +".SAFE"
         # if TITLE.split(".")[1] != "SAFE":
         #  TITLE=TITLE.split(".")[0]+".SAFE"
         plog(f"[*][ New Title {TITLE}")
-        STITLE = TITLE.split(".")[0]
-        run_stac_tools(STAC_BIN, PLATFORM, STITLE, SRC_DIR)
+        # STITLE = TITLE.split(".")[0]
+        # run_stac_tools(STAC_BIN, PLATFORM, STITLE, SRC_DIR)
+        run_stac_tools(STAC_BIN, PLATFORM, SRC_PROD_NAME, SRC_DIR)  # 20231116
 
         #
         # Get the latest json [ TBD REVIEW TEST ONLY FOR S2A 20231018 ]
