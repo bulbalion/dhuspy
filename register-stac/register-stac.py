@@ -21,10 +21,10 @@ import traceback
 
 PROGRAM_HEADER = """
 
-VERSION: 0.0.1l
+VERSION: 0.0.1k
 
 Last Update: 20231116
-Last Change: S2A OK, S3B OK
+Last Change: new download core, pdb script, S2A ok
 
 Changes:
 20230801 Initial version
@@ -47,7 +47,6 @@ Changes:
 20231109 batch debug test result edits
 20231114 download core rewritten - due to S3B large files
 20231116 new download core, pdb script, S2A ok
-20231116 S2A OK, S3B OK
 
 Description:
 
@@ -118,14 +117,16 @@ def fread(pfile, FDIR=None):
     return txt
 
 
-def fverify(pfile, FDIR=None):
+def fverify(pfile, sz=None, FDIR=None):
     ret = None
     FDIR = patch_fdir(FDIR)
     try:
         f = open(FDIR + pfile, "r")
         tmp = len(f.read())
         f.close()
-        plog(f"[+][ File {pfile} verify as txt o.k., size: {str(tmp)} b]")
+        plog(
+            f"[+][ File {pfile} verify as txt o.k., size: {str(tmp)} b expected: {str(sz)}]"
+        )
         ret = True
     except Exception as e:
         plog(f"[!][ File {pfile} Verify as txt not o.k. {str(e)}]")
@@ -135,9 +136,11 @@ def fverify(pfile, FDIR=None):
             f.close()
             plog(f"[+][ File {pfile} verify as bin o.k., size: {str(tmp)} b]")
             ret = True
-        except Exception as e:
-            plog(f"[!][ File {pfile} Verify not o.k. {str(e)}]")
+        except Exception as et:
+            plog(f"[!][ File {pfile} Verify not o.k. {str(et)}]")
             ret = False
+    if sz == tmp:
+        plog(f"[*][ File {pfile} download size equals header file size ]")
     return ret
 
 
@@ -164,7 +167,7 @@ def fwrite(pfile, txt, FDIR=None):
         plog(
             f"[F] written : FDIR: {FDIR} FILE: {pfile} BIN: {str(isinstance(txt, bytes))}"
         )
-        fverify(pfile)
+        fverify(pfile, len(txt))
     except Exception as e:
         plog(f"[*] error: fwrite cannot write {pfile} in {FDIR}")
         plog(f"[*] BIN: {str(isinstance(txt, bytes))} error: {str(e)}")
@@ -263,6 +266,7 @@ def exc_handl(e, msg, warning=True):
 
 
 def osexit(P_ERR_CODE):
+    rmlock()  # 20231116
     exit(P_ERR_CODE)
 
 
@@ -371,9 +375,13 @@ def get_api_large_file(url, basicauth, is_stream):
 
 
 # def get_download_link_size(url):
-#  resp = request.head(url)
-#  print(str(resp.headers))
-#  #if download_size > 16*1024*1024:
+# #site = urllib.urlopen(url)
+# #meta = site.info()
+# #download_size = meta.getheaders("Content-Length")[0]
+# #resp = request.head(url)
+# #print(str(resp.headers))
+# #plog("[*] expected download size")
+
 #  plog("Too large file, exiting")
 #  osexit(0)
 
@@ -386,19 +394,43 @@ def get_api_large_file(url, basicauth, is_stream):
 #  #  osexit(0)
 
 
+def get_download_size(sz, exp_sz):
+    pct = int(sz / int(exp_sz) * 100)
+    plog(f"[I][{pct:03}][ Download Percent: {pct:03}% ][ {sz:12} b / {exp_sz:12} b ]")
+
+
+def get_progress(cnt, exp_sz):
+    blocks = int(cnt * 8192)
+    pct = int(blocks / int(exp_sz) * 100)
+    plog(
+        f"[I][{pct:03}][ Download Percent: {pct:03}% ][ {cnt*8192:12} b / {exp_sz:12} b ]"
+    )
+
+
 def download_file(url, params, basicauth):
     resp = b""
     cnt = 0
+    new = True
+    exp_sz = 0
     # try:
+
+    # resp = requests.get(url,auth=basicauth,params=params,timeout=DOWNLOAD_TIMEOUT)
+    # use requests.get(url, stream=True).headers['Content-length']
     with requests.get(url, params=params, auth=basicauth, stream=True) as r:
+        if new:
+            plog(r.headers)
+            exp_sz = r.headers["Content-Length"]
+            # iexp_sz=int(int(exp_sz)/1024/1024)
+            plog(f"[*] Expected download size: {str(exp_sz)} b ]")
+            new = False
         r.raise_for_status()  # HERE 20231114
         # with open(fname, 'wb') as f:
         for chunk in r.iter_content(chunk_size=8192):
             # If you have chunk encoded response uncomment if
             # and set chunk_size parameter to None.
             if chunk:
-                if cnt % 1000 == 0:
-                    plog(f"[I][{(int(cnt/1000)):07}][ Download chunk ]")
+                if cnt % 1024 == 0:
+                    get_progress(cnt, exp_sz)
                 try:
                     if not resp:
                         # resp = chunk.decode("utf-8")  # f.write(chunk) txt
@@ -416,7 +448,12 @@ def download_file(url, params, basicauth):
                 cnt += 1
     # except Exception as e:
     #  plog("[*][ NO MORE DATA ON STREAM ]")
+    get_download_size(len(resp), exp_sz)
     return resp  # .decode("utf-8","replace")
+
+
+# def get_api_head(url):
+#    plog("[h] URL: " + url)
 
 
 #
@@ -453,6 +490,7 @@ def get_api(
         # HERE 20231107
         # if "text" not in resp:
         # resp = requests.get(url,auth=basicauth,params=params,timeout=DOWNLOAD_TIMEOUT)
+        # rhead = get_url_head(url,auth=basicauth,params=params,timeout=DOWNLOAD_TIMEOUT)
         # resp = resp.text
         # if not resp:
         resp = download_file(url, params, basicauth)
@@ -1512,6 +1550,7 @@ def main():
                 osexit(P_EXIT_FAILURE)
         if "status" in upload_res:
             if upload_res["status"] == "success":
+                plog("[*] Upload Confirm Status: " + str(upload_res["status"]))
                 plog("[*] uploaded status: " + str(upload_res["status"]))
                 plog("[*] uploaded inserted: " + str(upload_res["inserted"]))
                 plog("[*] uploaded inError: " + str(upload_res["inError"]))
@@ -1554,6 +1593,7 @@ def main():
             if "id" in upload_verify_res:
                 if upload_verify_res["id"] == upload_res["features"][0]["featureId"]:
                     plog("[+] UPLOAD VERIFY O.K.")
+                    fwrite(SRC_PROD_NAME + ".json", json.dumps(upload_res))
         else:
             plog("[*] Not verifyng upload.")
 
@@ -1569,7 +1609,7 @@ def main():
             exc_handl(e, "[ ERR RS-1000 ][!][ FAILURE IN MAIN. ]")
         # REMOVE THE LOCK FILE
         exc_handl(e, "[ ERR RS-0000 ][!][ FAILURE IN MAIN. ]")
-        rmlock()
+        # rmlock()
         # RETURN CONTROL TO SHELL
         osexit(P_EXIT_FAILURE)  # 20231016
 
