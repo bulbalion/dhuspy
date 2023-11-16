@@ -21,10 +21,10 @@ import traceback
 
 PROGRAM_HEADER = """
 
-VERSION: 0.0.1k
+VERSION: 0.0.1l
 
 Last Update: 20231116
-Last Change: new download core, pdb script, S2A ok
+Last Change: S2A OK, S3B OK
 
 Changes:
 20230801 Initial version
@@ -47,6 +47,7 @@ Changes:
 20231109 batch debug test result edits
 20231114 download core rewritten - due to S3B large files
 20231116 new download core, pdb script, S2A ok
+20231116 S2A OK, S3B OK
 
 Description:
 
@@ -64,7 +65,7 @@ TBD:
 
 """
 # CHANGE HERE DOWNLOAD DATA DIRECTORY
-FDIR_OUT = "/tmp/dhuspy/"
+FDIR_OUT = "/mnt/sdb1/tmp/dhuspy/"
 FNAME_LOCK = "register-stac.lock"
 
 # RUNTIME DIR
@@ -124,11 +125,19 @@ def fverify(pfile, FDIR=None):
         f = open(FDIR + pfile, "r")
         tmp = len(f.read())
         f.close()
-        plog(f"[+][ File {pfile} verify o.k., size: {str(tmp)} b]")
+        plog(f"[+][ File {pfile} verify as txt o.k., size: {str(tmp)} b]")
         ret = True
     except Exception as e:
-        plog(f"[!][ File {pfile} Verify not o.k. {str(e)}]")
-        ret = False
+        plog(f"[!][ File {pfile} Verify as txt not o.k. {str(e)}]")
+        try:
+            f = open(FDIR + pfile, "rb")
+            tmp = len(f.read())
+            f.close()
+            plog(f"[+][ File {pfile} verify as bin o.k., size: {str(tmp)} b]")
+            ret = True
+        except Exception as e:
+            plog(f"[!][ File {pfile} Verify not o.k. {str(e)}]")
+            ret = False
     return ret
 
 
@@ -607,7 +616,19 @@ def platform2manifest_url(P_ID, TITLE, PLATFORM, SUFFIX):
     #    + FNAME_MANIFEST
     #    + "')/$value"
     # )
-    if PLATFORM == "S1" or PLATFORM == "S2" or PLATFORM == "S3":
+    if PLATFORM == "S1" or PLATFORM == "S2":
+        sub_url = (
+            "/odata/v1/Products('"
+            + P_ID
+            + "')/Nodes('"
+            + TITLE  # .SUFFIX 20231116
+            + "')"
+            + "/"
+            + "Nodes('"
+            + FNAME_MANIFEST
+            + "')/$value"
+        )
+    elif PLATFORM == "S3":
         sub_url = (
             "/odata/v1/Products('"
             + P_ID
@@ -1296,6 +1317,16 @@ def main():
         PLATFORM = SRC_PROD_NAME[:2]
         fwrite(SRC_PROD_NAME, pro_meta)  # HERE
         SRC_PROD_NAME = SRC_PROD_NAME + ".SAFE"  # 20231116 thx zsustr
+        fnodexml, gsm = get_gsm(config, SRC_PROD_ID, SRC_PROD_NAME)
+        # 20231116 # get the product id soonest
+        src_xml = bs.BeautifulSoup(gsm, features="xml")
+        src_prod_id = ""
+        for val in src_xml.find_all("entry"):  # LIMITED
+            src_prod_id = str(val.find("Name").get_text())
+        plog(f"src_prod_id: {src_prod_id}")
+        # 20231116
+        # SRC_PROD_ID=src_prod_id
+        SRC_PROD_NAME = src_prod_id
 
         # DEBUG RUNTIME CHECK
         plog("[S] SOURCE PRODUCT ID   : " + SRC_PROD_ID)
@@ -1310,6 +1341,7 @@ def main():
         # TEST SOURCE AND TARGET AVAILABILITY [ TESTS ONLY? 20231030 ]
         #
 
+        # if PLATFORM != "S3":
         plog("[0] EVENT: getting source metadata manifest safe")
         fname_manifest = get_source_metadata_manifest_safe(
             config, SRC_PROD_ID, SRC_PROD_NAME, PLATFORM
