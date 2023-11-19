@@ -21,10 +21,10 @@ import traceback
 
 PROGRAM_HEADER = """
 
-VERSION: 0.0.1m
+VERSION: 0.0.1n
 
-Last Update: 20231117
-Last Change: skip cached files, tested S2A, S2B
+Last Update: 20231119
+Last Change: align to coding standard advisor
 
 Changes:
 20230801 Initial version
@@ -48,6 +48,7 @@ Changes:
 20231114 download core rewritten - due to S3B large files
 20231116 new download core, pdb script, S2A ok
 20231117 skip cached files, tested S2A, S2B
+20231119 align to coding standard advisor
 
 Description:
 
@@ -64,6 +65,10 @@ TBD:
 [*] post request reimplementation
 
 """
+
+# USE CACHE
+USE_CACHE=True
+
 # CHANGE HERE DOWNLOAD DATA DIRECTORY
 FDIR_OUT = "/mnt/sdb1/tmp/dhuspy/"
 FNAME_LOCK = "register-stac.lock"
@@ -111,9 +116,8 @@ def patch_fdir(FDIR):
 # read node.xml
 def fread(pfile, FDIR=None):
     FDIR = patch_fdir(FDIR)
-    f = open(FDIR + pfile, "rb")
-    txt = f.read()
-    f.close()
+    with open(FDIR + pfile, "rb") as f:
+      txt = f.read()
     plog(f"[*][ fread FDIR: {FDIR} pfile: {pfile}")
     return txt
 
@@ -121,23 +125,21 @@ def fread(pfile, FDIR=None):
 def fverify(pfile, sz=None, FDIR=None):
     tmp = 0
     ret = None
-    FDIR = patch_fdir(FDIR)
+    #FDIR = patch_fdir(FDIR)
     os.chdir(FDIR)
     try:
-        f = open(pfile, "r")
-        tmp = len(f.read())
-        f.close()
-        plog(
-            f"[+][ File {pfile} verify as txt o.k., size: {str(tmp)} b expected: {str(sz)}]"
-        )
+        with open(pfile, "r") as f:
+          tmp = len(f.read())
+          plog(
+              f"[+][ File {pfile} verify as txt o.k., size: {str(tmp)} b expected: {str(sz)}]"
+          )
         # ret = True
     except Exception as e:
         plog(f"[!][ File {pfile} Verify as txt not o.k. {str(e)}]")
         try:
-            f = open(pfile, "rb")
-            tmp = len(f.read())
-            f.close()
-            plog(f"[+][ File {pfile} verify as bin o.k., size: {str(tmp)} b]")
+            with open(pfile, "rb") as f:
+              tmp = len(f.read())
+              plog(f"[+][ File {pfile} verify as bin o.k., size: {str(tmp)} b]")
             # ret = True
         except Exception as et:
             plog(f"[!][ File {pfile} Verify not o.k. {str(et)}]")
@@ -167,16 +169,15 @@ def fwrite(pfile, txt, FDIR=None):
         if os.sep in pfile:
             fpfile = pfile.split(os.sep)[-1]
         if isinstance(txt, bytes):
-            f = open(fpfile, "wb")
-            f.write(txt)
+            with open(fpfile, "wb") as f:
+              f.write(txt)
         else:
-            f = open(fpfile, "w")
-            f.write(txt)
-        f.close()
+            with open(fpfile, "w") as f:
+              f.write(txt)
         plog(
-            f"[F] written : FDIR: {FDIR} FILE: {pfile} BIN: {str(isinstance(txt, bytes))}"
+          f"[F] written : FDIR: {FDIR} FILE: {pfile} BIN: {str(isinstance(txt, bytes))}"
         )
-        fverify(fpfile, len(txt), FDIR)  # 20231116
+        fverify(fpfile, len(txt),FDIR)  # 20231116
     except Exception as e:
         plog(f"[*] error: fwrite cannot write {pfile} in {FDIR}")
         plog(f"[*] BIN: {str(isinstance(txt, bytes))} error: {str(e)}")
@@ -880,26 +881,28 @@ def get_metadata_file(TITLE, config, urls, src_fpaths, src_fnames):
         # try to get dest size
         exp_sz = 0
         fdown_sz = 0
-        try:
-            tmp_basicauth = None
-            user = config["source"]["username"]
-            password = config["source"]["password"]
-            if user and password:
-                tmp_basicauth = HTTPBasicAuth(user, password)
-            tmp_url = "https://" + src_server + urls[x]
-            tmp_params = dict()
-            with requests.get(
-                tmp_url, params=tmp_params, auth=tmp_basicauth, stream=True
-            ) as r:
-                if "Content-Length" in r.headers:
-                    exp_sz = int(r.headers["Content-Length"])
-                    # plog()
-            fdown_sz = len(fread(tfname, FDIR="./"))
-        except Exception as e:
-            exc_handl(
-                e, f"[*] Expected download size: {str(exp_sz)} b Error: {str(e)} ]"
-            )
-        plog(f"[I] re-download decision exp_sz: {exp_sz} fdown_sz: {fdown_sz} ")
+        if USE_CACHE is True:
+          try:
+              tmp_basicauth = None
+              user = config["source"]["username"]
+              password = config["source"]["password"]
+              if user and password:
+                  tmp_basicauth = HTTPBasicAuth(user, password)
+              tmp_url = "https://" + src_server + urls[x]
+              tmp_params = dict()
+              with requests.get(
+                  tmp_url, params=tmp_params, auth=tmp_basicauth, stream=True
+              ) as r:
+                  if "Content-Length" in r.headers:
+                      exp_sz = int(r.headers["Content-Length"])
+                      # plog()
+              fdown_sz = len(fread(tfname, FDIR="./"))
+          except Exception as e:
+              exc_handl(
+                  e, f"[*] Expected download size: {str(exp_sz)} b Error: {str(e)} ]"
+              )
+          plog(f"[I] re-download decision exp_sz: {exp_sz} fdown_sz: {fdown_sz} ")
+        # IF NO CACHE IT USES exp_sz AND fdown_sz default to 0
         if exp_sz != fdown_sz:
             # GET THE FILE
             res = get_api(
@@ -1333,6 +1336,16 @@ def get_suffix_from_titles(titles):
     return SUFFIX
 
 
+# 20231117 # get the product id soonest
+def get_src_prod_id_from_gsm(gsm):
+  src_xml = bs.BeautifulSoup(gsm, features="xml")
+  src_prod_id = ""
+  for val in src_xml.find_all("entry"):  # LIMITED
+      src_prod_id = str(val.find("Name").get_text())
+  #plog(f"src_prod_id: {src_prod_id}")
+  return(src_prod_id)
+ 
+
 ####################################################################
 #
 # RUNTIME
@@ -1408,10 +1421,11 @@ def main():
         # SRC_PROD_NAME = SRC_PROD_NAME + ".SAFE"  # 20231116 thx zsustr
         fnodexml, gsm = get_gsm(config, INP_PROD_ID, SRC_PROD_NAME + ".SAFE")
         # 20231116 # get the product id soonest
-        src_xml = bs.BeautifulSoup(gsm, features="xml")
-        src_prod_id = ""
-        for val in src_xml.find_all("entry"):  # LIMITED
-            src_prod_id = str(val.find("Name").get_text())
+        src_prod_id=get_src_prod_id_from_gsm(gsm)
+        #src_xml = bs.BeautifulSoup(gsm, features="xml")
+        #src_prod_id = ""
+        #for val in src_xml.find_all("entry"):  # LIMITED
+        #    src_prod_id = str(val.find("Name").get_text())
         plog(f"src_prod_id: {src_prod_id}")
         # 20231116
         SRC_PROD_ID = src_prod_id
@@ -1617,12 +1631,11 @@ def main():
                 )
                 plog("[*] uploaded erorrs: " + str(upload_res["errors"]))
                 plog("[+] UPLOAD O.K.")
-                f = open(
+                with open(
                     "upload_" + upload_res["features"][0]["productIdentifier"] + ".log",
                     "w",
-                )
-                f.write(json.dumps(upload_res))
-                f.close()
+                ) as f:
+                  f.write(json.dumps(upload_res))
 
         # basicauth=None
         if "status" in upload_res:
