@@ -14,6 +14,7 @@ from pathlib import Path
 import re
 import requests
 from requests.auth import HTTPBasicAuth
+import shutil
 import subprocess
 import sys
 import traceback
@@ -21,10 +22,10 @@ import traceback
 
 PROGRAM_HEADER = """
 
-VERSION: 0.0.1n
+VERSION: 0.0.1o
 
-Last Update: 20231119
-Last Change: align to coding standard advisor
+Last Update: 20231128
+Last Change: S5P Upload Verify O.K.
 
 Changes:
 20230801 Initial version
@@ -49,6 +50,7 @@ Changes:
 20231116 new download core, pdb script, S2A ok
 20231117 skip cached files, tested S2A, S2B
 20231119 align to coding standard advisor
+20231128 S5P verify upload O.K. [ continuous download, S5P manifest ]
 
 Description:
 
@@ -70,7 +72,7 @@ TBD:
 USE_CACHE=True
 
 # CHANGE HERE DOWNLOAD DATA DIRECTORY
-FDIR_OUT = "/mnt/sdb1/tmp/dhuspy/"
+FDIR_OUT = "/root/dhuspy/register-stac/tmp"
 FNAME_LOCK = "register-stac.lock"
 
 # RUNTIME DIR
@@ -187,8 +189,10 @@ def fwrite(pfile, txt, FDIR=None):
 # REQ 20230801002 Obtains metadata for the given product from DHuS storage | 002
 # save node.xml
 def fexists(file):
+    if FDIR_OUT[-1]!=os.sep:
+       file=os.sep+file
     str_fname = FDIR_OUT + file
-    # print(str_fname)
+    print(str_fname)
     ret = Path(str_fname).is_file()
     return int(ret)
 
@@ -1022,6 +1026,7 @@ def cmd_stac(params):
 # WARNINGS: FixWindingWarning: The exterior ring of this shape is wound clockwise.
 # /mnt/sdb1/DHusTools/tmp/mp-sentinel-2-l2a/metadata.xml
 def run_stac_tools(STAC_BIN, platform, title, SRC_DIR="./"):
+    res=None
     plog("[I] TITLE TO RUN STAC TOOLS: " + str(title))
     # TBD: Explore windingw no fix
     params = []
@@ -1040,10 +1045,12 @@ def run_stac_tools(STAC_BIN, platform, title, SRC_DIR="./"):
     if cmdres.returncode == 0:
         for stdres in cmdres.stdout:
             plog(stdres)
+        res=0
     else:
         for stdres in cmdres.stderr.decode().split("\n"):
             plog(stdres)
-    return cmdres.stdout
+        res=100
+    return (cmdres.stdout,res)
     ################################
 
 
@@ -1298,7 +1305,9 @@ def get_product_name_by_id(pro_meta, HOST):
 
 def rmlock():
     try:
-        os.remove(FDIR_OUT + FNAME_LOCK)
+        dec_rm = fexists(FNAME_LOCK)  # TEST IF THE FILE EXISTS
+        if dec_rm: 
+          os.remove(FDIR_OUT +os.sep + FNAME_LOCK)
     except Exception as e:
         plog(f"[ ERR RS-0010 ][!][ CANNOT REMOVE THE LOCK FILE ERR: {str(e)}]")
 
@@ -1428,9 +1437,10 @@ def main():
         #    src_prod_id = str(val.find("Name").get_text())
         plog(f"src_prod_id: {src_prod_id}")
         # 20231116
-        SRC_PROD_ID = src_prod_id
         # fwrite(SRC_PROD_ID, pro_meta)  # HERE 20231116
 
+        DST_COLLECTION = None
+        SRC_PROD_ID = src_prod_id
         # DEBUG RUNTIME CHECK
         plog("[S] SOURCE PRODUCT ID   : " + SRC_PROD_ID)
         plog("[S] SOURCE PRODUCT NAME : " + SRC_PROD_NAME)
@@ -1443,103 +1453,138 @@ def main():
         #
         # TEST SOURCE AND TARGET AVAILABILITY [ TESTS ONLY? 20231030 ]
         #
-
-        # if PLATFORM != "S3":
         plog("[0] EVENT: getting source metadata manifest safe")
-        # 20231117
-        fname_manifest = get_source_metadata_manifest_safe(
-            config, INP_PROD_ID, SRC_PROD_ID, PLATFORM
-        )
-        plog(f"[0] EVENT: has source metadata manifest safe {fname_manifest}")
-        metadata = get_source_metadata_all(SRC_PROD_ID, SRC_PROD_ID, PLATFORM)
-        plog(f"[I] metadata type: {str(type(metadata))}")
-        fnodexml, gsm = get_gsm(config, INP_PROD_ID, SRC_PROD_ID)
-        titles = update_source_metadata_nodexml(fnodexml, SRC_PROD_NAME)
-        SUFFIX = get_suffix_from_titles(titles)
-        plog(f"[*] titles: {str(titles)} SUFFIX: {SUFFIX}")
-        plog("[*] SRC_PROD_ID: " + SRC_PROD_ID)
-        # PLACEHOLDER FOR FIXED PROC_CMD_OPTS
-        # Get the manifest.safe
-        # GET ALL SOURCE METADATA - only for given sentinels
-        # if PLATFORM == "S1" or PLATFORM == "S2":
-        # Update node.xml source metadata
+        DST_COLLECTION = translate_prod2col([SRC_PROD_ID], PLATFORM, DST_COL_TEST_PREFIX)
+        #plog("DST_COLLECTION: " + DST_COLLECTION)        # 20231117
+        DST_FILE=f"{FDIR_OUT}{os.sep}{SRC_PROD_ID}"
+        if PLATFORM == "S5":
+          SRC_DIR=f"{SRC_PROD_ID}"
+          TMP_DIR=f"{SRC_PROD_ID}_tmp{os.sep}"
+          SRC_FILE=f"{TMP_DIR}{SRC_PROD_ID}"
+          #DST_FILE=f"{SRC_PROD_ID}{os.sep}{SRC_PROD_ID}"
+          #FILE_TEST=fexists(DST_FILE)
+          TRG_FNAME=f"{SRC_PROD_ID}"
+          DST_FNAME=f"{SRC_PROD_ID}{os.sep}{SRC_PROD_ID}"
+          FILE_TEST=fexists(DST_FNAME)
+          TRG_TEST=fexists(TRG_FNAME)
+          plog(f"[*] FILE_TEST {str(FILE_TEST)} {DST_FNAME}")
+          if TRG_TEST == 0:  # TEST IF THE FILE EXISTS
+            try:
+              shutil.move(FDIR_OUT+os.sep+SRC_DIR,FDIR_OUT+os.sep+TMP_DIR)
+              plog(f"[*] mv {SRC_DIR} {TMP_DIR}")
+            except Exception as e:
+              exc_handl(e, "[ ERR RS-1201 ][!][ FAILURE IN MAIN. ]")
+              plog(f"[ S5 ERROR ][ {str(e)} ]")
+            try:
+              shutil.move(FDIR_OUT+os.sep+SRC_FILE,FDIR_OUT+os.sep+TRG_FNAME)
+              plog(f"[*] mv {SRC_FILE} {DST_FNAME}")
+            except Exception as e:
+              exc_handl(e, "[ ERR RS-1202 ][!][ FAILURE IN MAIN. ]")
+              plog(f"[ S5 ERROR ][ {str(e)} ]")
+            try:
+              os.rmdir(FDIR_OUT+os.sep+TMP_DIR)
+              plog(f"[*] rmdir {TMP_DIR}")
+            except Exception as e:
+              exc_handl(e, "[ ERR RS-1203 ][!][ FAILURE IN MAIN. ]")
+              plog(f"[ S5 ERROR ][ {str(e)} ]")
+          plog(f"[*] FILE_TEST {TRG_TEST} {fexists(TRG_FNAME)} {str(TRG_FNAME)}")
+          TRG_TEST=fexists(TRG_FNAME)
+          if TRG_TEST == 0:
+            fname_manifest = get_source_metadata_manifest_safe(
+              config, INP_PROD_ID, SRC_PROD_ID, PLATFORM
+            )
+            plog(f"[0] EVENT: has source metadata manifest safe {fname_manifest}")
+        #plog(f"[0] EVENT: has source metadata manifest safe {fname_manifest}")
+        elif PLATFORM == "S1" or PLATFORM == "S2":
 
-        # ADV DEBUG
-        # plog("P_ID: " + SRC_PROD_ID)
-        # plog("titles: " + str(titles))
-        #
-        plog(
-            f"[*] titles {titles} PLATFORM {PLATFORM} COL_PREFIX {DST_COL_TEST_PREFIX}"
-        )
+          metadata = get_source_metadata_all(SRC_PROD_ID, SRC_PROD_ID, PLATFORM)
+          plog(f"[I] metadata type: {str(type(metadata))}")
+          fnodexml, gsm = get_gsm(config, INP_PROD_ID, SRC_PROD_ID)
+          titles = update_source_metadata_nodexml(fnodexml, SRC_PROD_NAME)
+          SUFFIX = get_suffix_from_titles(titles)
+          plog(f"[*] titles: {str(titles)} SUFFIX: {SUFFIX}")
+          plog("[*] SRC_PROD_ID: " + SRC_PROD_ID)
+          # PLACEHOLDER FOR FIXED PROC_CMD_OPTS
+          # Get the manifest.safe
+          # GET ALL SOURCE METADATA - only for given sentinels
+          # if PLATFORM == "S1" or PLATFORM == "S2":
+          # Update node.xml source metadata
 
-        #
-        # GET DESTIONATION COLLECTION ID FROM PRODUCT ID
-        #
-        DST_COLLECTION = translate_prod2col(titles, PLATFORM, DST_COL_TEST_PREFIX)
+          # ADV DEBUG
+          # plog("P_ID: " + SRC_PROD_ID)
+          # plog("titles: " + str(titles))
+          #
+          plog(
+              f"[*] titles {titles} PLATFORM {PLATFORM} COL_PREFIX {DST_COL_TEST_PREFIX}"
+          )
+
+          #
+          # GET DESTIONATION COLLECTION ID FROM PRODUCT ID
+          # 20231128
+          # DST_COLLECTION = translate_prod2col(titles, PLATFORM, DST_COL_TEST_PREFIX)
+          # plog("DST_COLLECTION: " + DST_COLLECTION)
+
+          src_fnames, src_paths = get_source_metadata_all(
+              SRC_PROD_ID, SRC_PROD_ID, PLATFORM
+          )
+          # ADV DEBUG
+          # plog(f"src_fnames: {src_fnames[:3]}")
+          # plog(f"src_paths: {src_paths[:3]}")
+
+          #
+          # Patch the metadata
+          #
+          urls2, src_fpaths2, src_fnames2 = metadata_json_patch(
+              config, SRC_URL, src_fnames, src_paths, INP_PROD_ID, SRC_PROD_ID
+          )
+
+          plog("URLS2: " + str(urls2))
+          # These are the larger downloads
+          get_metadata_file(SRC_PROD_ID, config, urls2, src_fpaths2, src_fnames2)
+
+          # ADV DEBUG
+          # plog("src_fnames[:3] " + str(src_fnames[:3]))
+          # plog("src_fpaths[:3] " + str(src_fpaths2[:3]))
+          # plog("urls2[:3] " + str(urls2[:3]))
+
+          # if titles:
+          #    if len(titles) > 0:
+          #        SRC_PROD_NAME = titles[0]
+          #    else:
+          #        SRC_PROD_NAME = titles
+          #plog(f"[*][ {SRC_PROD_NAME} ]")
+          #DST_COLLECTION = translate_prod2col(
+          #    [SRC_PROD_NAME], PLATFORM, DST_COL_TEST_PREFIX
+          #)  # 20231109
+
+          #
+          # DEBUG ID AND NAMES
+          #
+          plog("SOURCE PRODUCT ID: " + SRC_PROD_ID)
+          plog("PLATFORM: " + PLATFORM)
+          # Translate source product ID to target collection ID
+          # TBD REVIEW HERE CHECK IF COLLECTION EXISTS IN TARGET
+          # Run the stac tools [ TBD REVIEW TEST ONLY FOR S2A 20231018 ]
+          plog("[>] Run the stac tools [...]")
+          TITLE = titles[0]
+          # SRC_DIR="./tmp"
+          plog("STAC_BIN: " + STAC_BIN)
+          plog("PLATFORM: " + PLATFORM)
+          plog("TITLE: " + TITLE)
+          # PATCH 20231106
+          # if PLATFORM == "S5":
+          #  plog("Not Patching TITLE: "+TITLE)
+          #  if "." in TITLE:
+          #    TITLE=TITLE.split(".")[0]+".SAFE"
+          #  plog("Not Patching TITLE: "+TITLE)
+          plog(f"[*][ TITLE {TITLE}")
+
         plog("DST_COLLECTION: " + DST_COLLECTION)
-
-        src_fnames, src_paths = get_source_metadata_all(
-            SRC_PROD_ID, SRC_PROD_ID, PLATFORM
-        )
-        # ADV DEBUG
-        # plog(f"src_fnames: {src_fnames[:3]}")
-        # plog(f"src_paths: {src_paths[:3]}")
-
-        #
-        # Patch the metadata
-        #
-        urls2, src_fpaths2, src_fnames2 = metadata_json_patch(
-            config, SRC_URL, src_fnames, src_paths, INP_PROD_ID, SRC_PROD_ID
-        )
-
-        plog("URLS2: " + str(urls2))
-        # These are the larger downloads
-        get_metadata_file(SRC_PROD_ID, config, urls2, src_fpaths2, src_fnames2)
-
-        # ADV DEBUG
-        # plog("src_fnames[:3] " + str(src_fnames[:3]))
-        # plog("src_fpaths[:3] " + str(src_fpaths2[:3]))
-        # plog("urls2[:3] " + str(urls2[:3]))
-
-        # if titles:
-        #    if len(titles) > 0:
-        #        SRC_PROD_NAME = titles[0]
-        #    else:
-        #        SRC_PROD_NAME = titles
-        plog(f"[*][ {SRC_PROD_NAME} ]")
-        DST_COLLECTION = translate_prod2col(
-            [SRC_PROD_NAME], PLATFORM, DST_COL_TEST_PREFIX
-        )  # 20231109
-
-        #
-        # DEBUG ID AND NAMES
-        #
-        plog("SOURCE PRODUCT ID: " + SRC_PROD_ID)
-        plog("DST_COLLECTION: " + DST_COLLECTION)
-        plog("PLATFORM: " + PLATFORM)
-        # Translate source product ID to target collection ID
-        # TBD REVIEW HERE CHECK IF COLLECTION EXISTS IN TARGET
-        # Run the stac tools [ TBD REVIEW TEST ONLY FOR S2A 20231018 ]
-        plog("[>] Run the stac tools [...]")
-        TITLE = titles[0]
-        # SRC_DIR="./tmp"
-        plog("STAC_BIN: " + STAC_BIN)
-        plog("PLATFORM: " + PLATFORM)
-        plog("TITLE: " + TITLE)
-        plog("DST_COLLECTION: " + DST_COLLECTION)
-        # PATCH 20231106
-        # if PLATFORM == "S5":
-        #  plog("Not Patching TITLE: "+TITLE)
-        #  if "." in TITLE:
-        #    TITLE=TITLE.split(".")[0]+".SAFE"
-        #  plog("Not Patching TITLE: "+TITLE)
-
         # RUN THE STAC TOOLS
         SRC_DIR = "./"  # this supposes the os.chdir
         plog("SRC_DIR: " + SRC_DIR)
         os.chdir(FDIR_OUT)
         # 20231108 PATCH SAFE
-        plog(f"[*][ TITLE bf patch {TITLE}")
 
         # 20231114
         # fwrite("metadata.xml",pro_meta,FDIR=TITLE) # 20231116
@@ -1549,11 +1594,18 @@ def main():
         #  TITLE=TITLE # +".SAFE"
         # if TITLE.split(".")[1] != "SAFE":
         #  TITLE=TITLE.split(".")[0]+".SAFE"
-        plog(f"[*][ New Title {TITLE}")
+        #plog(f"[*][ New Title {TITLE}")
         # if PLATFORM=="S5":
         #  STITLE = TITLE.split(".")[0]+".SAFE"
         # run_stac_tools(STAC_BIN, PLATFORM, STITLE, SRC_DIR)
-        run_stac_tools(STAC_BIN, PLATFORM, SRC_PROD_ID, SRC_DIR)  # 20231116
+        #if PLATFORM=="S5":
+        #run_stac_tools(STAC_BIN, PLATFORM, SRC_PROD_NAME, SRC_DIR)  # 20231116
+        #else:
+        cmdres,sres=run_stac_tools(STAC_BIN, PLATFORM, SRC_PROD_ID, SRC_DIR)  # 20231116
+        # 20231128
+        plog(f"[*] EVENT Stac Tools Result {str(sres)})")
+        if sres!=0:
+          osexit(sres)
 
         #
         # Get the latest json [ TBD REVIEW TEST ONLY FOR S2A 20231018 ]
@@ -1595,7 +1647,7 @@ def main():
         plog("[ ] SRC NAM: " + dbg_src_prod_name)
         plog("[ ] DST URL: " + dbg_dst_url)
         plog("[ ] DST USR: " + dbg_dst_user)
-        plog("[ ] DST COL: " + dbg_dst_collection)
+        #plog("[ ] DST COL: " + dbg_dst_collection)
         plog("[ ] DST PFR: " + dbg_dst_platform)
 
         #
@@ -1618,7 +1670,7 @@ def main():
                 osexit(P_EXIT_FAILURE)
         if "status" in upload_res:
             if upload_res["status"] == "success":
-                plog("[*] Upload Confirm Status: " + str(upload_res["status"]))
+                plog("[*] Upload status")
                 plog("[*] uploaded status: " + str(upload_res["status"]))
                 plog("[*] uploaded inserted: " + str(upload_res["inserted"]))
                 plog("[*] uploaded inError: " + str(upload_res["inError"]))
