@@ -13,6 +13,7 @@ from os import listdir, sep  # , path
 from pathlib import Path
 import re
 import requests
+from requests.adapters import HTTPAdapter, Retry
 from requests.auth import HTTPBasicAuth
 import shutil
 import subprocess
@@ -22,10 +23,10 @@ import traceback
 
 PROGRAM_HEADER = """
 
-VERSION: 0.0.1o
+VERSION: 0.0.1p
 
-Last Update: 20231128
-Last Change: S5P Upload Verify O.K.
+Last Update: 20231130
+Last Change: S5P download chunk size experiments, tests
 
 Changes:
 20230801 Initial version
@@ -51,6 +52,7 @@ Changes:
 20231117 skip cached files, tested S2A, S2B
 20231119 align to coding standard advisor
 20231128 S5P verify upload O.K. [ continuous download, S5P manifest ]
+20231130 S5P download chunk size experiments, tests
 
 Description:
 
@@ -65,14 +67,16 @@ TBD: $ black register-stac.py && flake8 --max-line-length 100
 TBD:
 
 [*] post request reimplementation
+[*] threaded download
 
 """
 
 # USE CACHE
 USE_CACHE=True
+DOWNLOAD_CHUNK_SIZE=100000000 # size of 1 chunk to download 100000000 = 100 MB
 
 # CHANGE HERE DOWNLOAD DATA DIRECTORY
-FDIR_OUT = "/root/dhuspy/register-stac/tmp"
+FDIR_OUT = "/home/user/dev/work/tmp/"
 FNAME_LOCK = "register-stac.lock"
 
 # RUNTIME DIR
@@ -147,7 +151,7 @@ def fverify(pfile, sz=None, FDIR=None):
             plog(f"[!][ File {pfile} Verify not o.k. {str(et)}]")
             ret = False
     if sz == tmp:
-        plog(f"[*][ File {pfile} download size equals header file size ]")
+        plog(f"[*][ File {pfile} sizes equals ]")
         ret = True
     return ret
 
@@ -371,13 +375,14 @@ def check_source_id(src_id):
 def get_api_large_file(url, basicauth, is_stream):
     local_filename = DOWNLOAD_SWAP_FNAME
     # NOTE the stream=True parameter below
+    total_size = get_size(url) # total size in bytes
     try:
         with requests.get(
             url=url, auth=basicauth, stream=is_stream, timeout=DOWNLOAD_TIMEOUT
         ) as r:
             r.raise_for_status()
             with open(local_filename, "wb") as f:
-                for chunk in r.iter_content(chunk_size=8192):
+                for chunk in r.iter_content(chunk_size=DOWNLOAD_CHUNK_SIZE,total  = total_size // DOWNLOAD_CHUNK_SIZE):
                     # If you have chunk encoded response uncomment if
                     # and set chunk_size parameter to None.
                     # if chunk:
@@ -425,6 +430,7 @@ def get_progress(cnt, exp_sz):
         )
 
 
+
 def download_file(url, params, basicauth):
     resp = b""
     cnt = 0
@@ -434,7 +440,10 @@ def download_file(url, params, basicauth):
 
     # resp = requests.get(url,auth=basicauth,params=params,timeout=DOWNLOAD_TIMEOUT)
     # use requests.get(url, stream=True).headers['Content-length']
-    with requests.get(url, params=params, auth=basicauth, stream=True) as r:
+    session=requests.Session()
+    retries = Retry(total=3,backoff_factor=0.1,status_forcelist=[ 500, 502, 503, 504 ])
+    session.mount('https://', HTTPAdapter(max_retries=retries))
+    with session.get(url, params=params, auth=basicauth, stream=True) as r:
         try:
             if new:
                 plog(r.headers)
@@ -447,11 +456,11 @@ def download_file(url, params, basicauth):
         except Exception as e:
             plog(f"[!] error while expected size retrieval {str(e)}")
         new = False
-        r.raise_for_status()  # HERE 20231114
-        # with open(fname, 'wb') as f:
         for chunk in r.iter_content(chunk_size=8192):
             # If you have chunk encoded response uncomment if
             # and set chunk_size parameter to None.
+            r.raise_for_status()  # HERE 20231130
+            # with open(fname, 'wb') as f:
             if chunk:
                 if cnt % 1024 == 0:
                     get_progress(cnt, exp_sz)
@@ -657,7 +666,12 @@ def platform2fname_manifest(P_ID, TITLE, PLATFORM):
     elif PLATFORM == "S3" or PLATFORM == "S3p":
         FNAME_MANIFEST = "xfdumanifest.xml"
     else:
-        # os.rmdir(TITLE)
+        plog(f"[*] rmdir {TITLE}")
+
+        try:
+          os.rmdir(FDIR_OUT+os.sep+TITLE) # 20231129
+        except Exception as e:
+          plog(f"[*] rmdir {TITLE} failed with error {str(e)}")
         FNAME_MANIFEST = TITLE
     return FNAME_MANIFEST
 
@@ -1456,46 +1470,55 @@ def main():
         plog("[0] EVENT: getting source metadata manifest safe")
         DST_COLLECTION = translate_prod2col([SRC_PROD_ID], PLATFORM, DST_COL_TEST_PREFIX)
         #plog("DST_COLLECTION: " + DST_COLLECTION)        # 20231117
-        DST_FILE=f"{FDIR_OUT}{os.sep}{SRC_PROD_ID}"
+        #DST_FILE=f"{FDIR_OUT}{os.sep}{SRC_PROD_ID}"
         if PLATFORM == "S5":
-          SRC_DIR=f"{SRC_PROD_ID}"
-          TMP_DIR=f"{SRC_PROD_ID}_tmp{os.sep}"
-          SRC_FILE=f"{TMP_DIR}{SRC_PROD_ID}"
+          #SRC_DIR=f"{SRC_PROD_ID}"
+          #TMP_DIR=f"{SRC_PROD_ID}_tmp{os.sep}"
+          #SRC_FILE=f"{TMP_DIR}{SRC_PROD_ID}"
           #DST_FILE=f"{SRC_PROD_ID}{os.sep}{SRC_PROD_ID}"
           #FILE_TEST=fexists(DST_FILE)
           TRG_FNAME=f"{SRC_PROD_ID}"
-          DST_FNAME=f"{SRC_PROD_ID}{os.sep}{SRC_PROD_ID}"
-          FILE_TEST=fexists(DST_FNAME)
-          TRG_TEST=fexists(TRG_FNAME)
-          plog(f"[*] FILE_TEST {str(FILE_TEST)} {DST_FNAME}")
-          if TRG_TEST == 0:  # TEST IF THE FILE EXISTS
-            try:
-              shutil.move(FDIR_OUT+os.sep+SRC_DIR,FDIR_OUT+os.sep+TMP_DIR)
-              plog(f"[*] mv {SRC_DIR} {TMP_DIR}")
-            except Exception as e:
-              exc_handl(e, "[ ERR RS-1201 ][!][ FAILURE IN MAIN. ]")
-              plog(f"[ S5 ERROR ][ {str(e)} ]")
-            try:
-              shutil.move(FDIR_OUT+os.sep+SRC_FILE,FDIR_OUT+os.sep+TRG_FNAME)
-              plog(f"[*] mv {SRC_FILE} {DST_FNAME}")
-            except Exception as e:
-              exc_handl(e, "[ ERR RS-1202 ][!][ FAILURE IN MAIN. ]")
-              plog(f"[ S5 ERROR ][ {str(e)} ]")
-            try:
-              os.rmdir(FDIR_OUT+os.sep+TMP_DIR)
-              plog(f"[*] rmdir {TMP_DIR}")
-            except Exception as e:
-              exc_handl(e, "[ ERR RS-1203 ][!][ FAILURE IN MAIN. ]")
-              plog(f"[ S5 ERROR ][ {str(e)} ]")
-          plog(f"[*] FILE_TEST {TRG_TEST} {fexists(TRG_FNAME)} {str(TRG_FNAME)}")
+          #DST_FNAME=f"{SRC_PROD_ID}{os.sep}{SRC_PROD_ID}"
+          #FILE_TEST=fexists(DST_FNAME)
+          #TRG_TEST=fexists(TRG_FNAME)
+          #plog(f"[*] FILE_TEST {str(FILE_TEST)} {DST_FNAME}")
+          # 20231129
+          # TRY=1
+          # if TRG_TEST == 0:  # TEST IF THE FILE EXISTS
+          #   if TRY==1:
+          #     try:
+          #      shutil.move(FDIR_OUT+os.sep+SRC_DIR,FDIR_OUT+os.sep+TMP_DIR)
+          #      plog(f"[*] mv {SRC_DIR} {TMP_DIR}")
+          #    except Exception as e:
+          #      exc_handl(e, "[ ERR RS-1201 ][!][ FAILURE IN MAIN. ]")
+          #      plog(f"[ S5 ERROR ][ {str(e)} ]")
+          #      TRY=0
+          #  if TRY==1:
+          #    try:
+          #      shutil.move(FDIR_OUT+os.sep+SRC_FILE,FDIR_OUT+os.sep+TRG_FNAME)
+          #      plog(f"[*] mv {SRC_FILE} {DST_FNAME}")
+          #      TRY=0
+          #    except Exception as e:
+          #      exc_handl(e, "[ ERR RS-1202 ][!][ FAILURE IN MAIN. ]")
+          #      plog(f"[ S5 ERROR ][ {str(e)} ]")
+          #  if TRY==1:
+          #    try:
+          #      os.rmdir(FDIR_OUT+os.sep+TMP_DIR)
+          #      plog(f"[*] rmdir {TMP_DIR}")
+          #    except Exception as e:
+          #      exc_handl(e, "[ ERR RS-1203 ][!][ FAILURE IN MAIN. ]")
+          #      plog(f"[ S5 ERROR ][ {str(e)} ]")
+          #      TRY=0
+          #plog(f"[*] FILE_TEST {TRG_TEST} {fexists(TRG_FNAME)} {str(TRG_FNAME)}")
           TRG_TEST=fexists(TRG_FNAME)
           if TRG_TEST == 0:
             fname_manifest = get_source_metadata_manifest_safe(
               config, INP_PROD_ID, SRC_PROD_ID, PLATFORM
             )
-            plog(f"[0] EVENT: has source metadata manifest safe {fname_manifest}")
+          plog(f"[0] EVENT: has source metadata manifest safe {fname_manifest}")
+          exit(0) # TMP 20231129
         #plog(f"[0] EVENT: has source metadata manifest safe {fname_manifest}")
-        elif PLATFORM == "S1" or PLATFORM == "S2":
+        elif PLATFORM == "S1" or PLATFORM == "S2" or PLATFORM == "S3":
 
           metadata = get_source_metadata_all(SRC_PROD_ID, SRC_PROD_ID, PLATFORM)
           plog(f"[I] metadata type: {str(type(metadata))}")
